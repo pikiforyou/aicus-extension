@@ -4,10 +4,33 @@ class AicusNavigator {
     this.isVisible = false;
     this.isMinimized = false;
     this.isCollapsed = false;
+    this.showSettings = false;
     this.shadowRoot = null;
     this.container = null;
     this.observer = null;
     this.questions = [];
+    
+    // 설정값 (로컬 스토리지 대신 메모리에 저장)
+    this.settings = {
+      accentColor: '#3b82f6',
+      theme: 'auto' // auto, light, dark
+    };
+    
+    // 팬톤 파스텔 컬러 팔레트
+    this.colorPalette = [
+      { name: 'Blue', color: '#3b82f6' }, // 기본값
+      { name: 'Lavender', color: '#BCBAE6' },
+      { name: 'Mint Green', color: '#AFE6AC' },
+      { name: 'Sky Blue', color: '#C3E9DB' },
+      { name: 'Soft Yellow', color: '#F0F0B1' },
+      { name: 'Baby Pink', color: '#EEC2C5' },
+      { name: 'Lilac', color: '#E0A0E6' },
+      { name: 'Peach Fuzz', color: '#FFBE98' },
+      { name: 'Soft Coral', color: '#FF9999' },
+      { name: 'Sage Green', color: '#B2D3B2' },
+      { name: 'Powder Blue', color: '#B8D4E3' },
+      { name: 'Cream', color: '#F5F5DC' }
+    ];
     
     this.init();
   }
@@ -69,15 +92,15 @@ class AicusNavigator {
         display: flex;
         align-items: center;
         padding: 12px 16px;
-        background: rgba(0, 0, 0, 0.05);
-        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        background: var(--header-bg, rgba(0, 0, 0, 0.05));
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
         cursor: move;
         user-select: none;
       }
 
       .dark .header {
-        background: rgba(255, 255, 255, 0.05);
-        border-bottom-color: rgba(255, 255, 255, 0.1);
+        background: var(--header-bg, rgba(255, 255, 255, 0.05));
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
       }
 
       .title {
@@ -163,14 +186,14 @@ class AicusNavigator {
 
       .question-item {
         padding: 8px 16px;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
         cursor: pointer;
         transition: background 0.2s ease;
         position: relative;
       }
 
       .dark .question-item {
-        border-bottom-color: rgba(255, 255, 255, 0.05);
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.05));
       }
 
       .question-item:hover {
@@ -186,7 +209,7 @@ class AicusNavigator {
         line-height: 1.4;
         color: #333;
         display: -webkit-box;
-        -webkit-line-clamp: 3;
+        -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         padding: 4px 0;
@@ -227,6 +250,72 @@ class AicusNavigator {
         display: none;
       }
 
+      .settings-panel {
+        display: none;
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        background: var(--settings-bg, rgba(0, 0, 0, 0.02));
+      }
+
+      .dark .settings-panel {
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
+        background: var(--settings-bg, rgba(255, 255, 255, 0.02));
+      }
+
+      .navigator.show-settings .settings-panel {
+        display: block;
+      }
+
+      .settings-title {
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: #333;
+      }
+
+      .dark .settings-title {
+        color: #e2e8f0;
+      }
+
+      .color-palette {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      .color-option {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s ease;
+        position: relative;
+      }
+
+      .color-option:hover {
+        transform: scale(1.1);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+
+      .color-option.selected {
+        border-color: #fff;
+        box-shadow: 0 0 0 2px var(--accent-color, #3b82f6);
+      }
+
+      .color-option.selected::after {
+        content: '✓';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+
       @media (prefers-color-scheme: dark) {
         .navigator {
           background: rgba(30, 30, 30, 0.95);
@@ -254,7 +343,7 @@ class AicusNavigator {
       <div class="minimized-icon">
         <svg class="aicus-icon" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true">
           <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
-          <path fill="#3b82f6" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="var(--accent-color, #3b82f6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
           <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
@@ -262,9 +351,9 @@ class AicusNavigator {
         </svg>
       </div>
       <div class="header">
-        <svg class="aicus-icon" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+        <svg class="aicus-icon settings-btn" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true" style="cursor: pointer;" title="설정">
           <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
-          <path fill="#3b82f6" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="var(--accent-color, #3b82f6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
           <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
@@ -282,6 +371,10 @@ class AicusNavigator {
           <button class="control-btn close-btn" title="닫기">×</button>
         </div>
       </div>
+      <div class="settings-panel">
+        <div class="settings-title">테마 색상</div>
+        <div class="color-palette"></div>
+      </div>
       <div class="content">
         <div class="empty-state">질문을 찾는 중...</div>
       </div>
@@ -289,6 +382,8 @@ class AicusNavigator {
     `;
 
     this.shadowRoot.appendChild(navigator);
+    this.updateColorPalette();
+    this.applyColorScheme();
   }
 
   setupEventListeners() {
@@ -375,10 +470,16 @@ class AicusNavigator {
     resizeHandle.addEventListener('mousedown', startResize);
 
     // 컨트롤 버튼
+    const settingsBtn = this.shadowRoot.querySelector('.settings-btn');
+    
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
     closeBtn.addEventListener('click', () => this.hide());
     minimizeBtn.addEventListener('click', () => this.toggleMinimize());
     minimizedIcon.addEventListener('click', () => this.toggleMinimize());
+    settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSettings();
+    });
   }
 
   setupMutationObserver() {
@@ -496,7 +597,7 @@ class AicusNavigator {
 
     const questionsHTML = this.questions.map(question => `
       <div class="question-item" data-index="${question.index}">
-        <div class="question-text">${this.escapeHtml(question.text.substring(0, 120))}${question.text.length > 120 ? '...' : ''}</div>
+        <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
     `).join('');
 
@@ -579,9 +680,70 @@ class AicusNavigator {
     
     if (this.isMinimized) {
       navigator.classList.add('minimized');
+      this.showSettings = false; // 최소화 시 설정 닫기
+      navigator.classList.remove('show-settings');
     } else {
       navigator.classList.remove('minimized');
     }
+  }
+
+  toggleSettings() {
+    this.showSettings = !this.showSettings;
+    const navigator = this.shadowRoot.querySelector('.navigator');
+    
+    if (this.showSettings) {
+      navigator.classList.add('show-settings');
+    } else {
+      navigator.classList.remove('show-settings');
+    }
+  }
+
+  updateColorPalette() {
+    const colorPalette = this.shadowRoot.querySelector('.color-palette');
+    
+    colorPalette.innerHTML = this.colorPalette.map(color => `
+      <div class="color-option ${color.color === this.settings.accentColor ? 'selected' : ''}" 
+           style="background-color: ${color.color};" 
+           data-color="${color.color}"
+           title="${color.name}">
+      </div>
+    `).join('');
+
+    // 색상 선택 이벤트
+    colorPalette.addEventListener('click', (e) => {
+      if (e.target.classList.contains('color-option')) {
+        const newColor = e.target.dataset.color;
+        this.settings.accentColor = newColor;
+        this.applyColorScheme();
+        this.updateColorPalette(); // 선택 상태 업데이트
+      }
+    });
+  }
+
+  applyColorScheme() {
+    const navigator = this.shadowRoot.querySelector('.navigator');
+    
+    // CSS 변수 설정
+    navigator.style.setProperty('--accent-color', this.settings.accentColor);
+    
+    // 액센트 컬러 기반으로 배경색 계산
+    const accentRgb = this.hexToRgb(this.settings.accentColor);
+    const headerBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.08)`;
+    const borderColor = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
+    const settingsBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.05)`;
+    
+    navigator.style.setProperty('--header-bg', headerBg);
+    navigator.style.setProperty('--border-color', borderColor);
+    navigator.style.setProperty('--settings-bg', settingsBg);
+  }
+
+  hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : { r: 59, g: 130, b: 246 }; // 기본값
   }
 
   show() {
