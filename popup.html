@@ -18,14 +18,17 @@
     }
     
     .logo {
-      font-size: 32px;
       margin-bottom: 8px;
+    }
+    
+    .aicus-icon {
+      color: white;
     }
     
     .title {
       font-size: 18px;
       font-weight: 600;
-      margin: 0;
+      margin: 8px 0 0 0;
     }
     
     .subtitle {
@@ -88,16 +91,25 @@
 </head>
 <body>
   <div class="header">
-    <div class="logo">🧭</div>
-    <h1 class="title">Ai-cus</h1>
+    <div class="logo">
+      <svg class="aicus-icon" viewBox="0 0 64 64" width="48" height="48" aria-hidden="true">
+        <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
+        <path fill="#3b82f6" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+        <path fill="currentColor" d="M36 20 44 34 28 44z"/>
+        <circle cx="32" cy="32" r="3" fill="currentColor"/>
+        <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
+        <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
+      </svg>
+    </div>
+    <h1 class="title">aicus</h1>
     <p class="subtitle">Chat Navigator</p>
   </div>
   
   <ul class="feature-list">
-    <li class="feature-item">채팅 질문 자동 감지</li>
-    <li class="feature-item">원클릭 질문 이동</li>
+    <li class="feature-item">사용자 질문 자동 감지</li>
+    <li class="feature-item">원클릭 질문 점프</li>
     <li class="feature-item">드래그 & 리사이즈</li>
-    <li class="feature-item">다크모드 지원</li>
+    <li class="feature-item">개선된 다크모드</li>
     <li class="feature-item">Claude & ChatGPT 호환</li>
   </ul>
   

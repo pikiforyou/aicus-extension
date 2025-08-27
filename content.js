@@ -89,7 +89,7 @@ class AicusNavigator {
       }
 
       .dark .title {
-        color: #fff;
+        color: #e2e8f0;
       }
 
       .controls {
@@ -109,6 +109,11 @@ class AicusNavigator {
         display: flex;
         align-items: center;
         justify-content: center;
+        color: #444;
+      }
+
+      .dark .control-btn {
+        color: #e2e8f0;
       }
 
       .control-btn:hover {
@@ -116,7 +121,7 @@ class AicusNavigator {
       }
 
       .dark .control-btn:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.15);
       }
 
       .resize-handle {
@@ -179,42 +184,16 @@ class AicusNavigator {
       .question-text {
         font-size: 13px;
         line-height: 1.4;
-        color: #444;
+        color: #333;
         display: -webkit-box;
-        -webkit-line-clamp: 2;
+        -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        margin-bottom: 4px;
+        padding: 4px 0;
       }
 
       .dark .question-text {
-        color: #ccc;
-      }
-
-      .question-meta {
-        font-size: 11px;
-        color: #888;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .dark .question-meta {
-        color: #888;
-      }
-
-      .question-index {
-        background: rgba(59, 130, 246, 0.1);
-        color: #3b82f6;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 10px;
-        font-weight: 500;
-      }
-
-      .dark .question-index {
-        background: rgba(59, 130, 246, 0.2);
-        color: #60a5fa;
+        color: #e2e8f0;
       }
 
       .empty-state {
@@ -272,13 +251,34 @@ class AicusNavigator {
     }
 
     navigator.innerHTML = `
-      <div class="minimized-icon">🧭</div>
+      <div class="minimized-icon">
+        <svg class="aicus-icon" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true">
+          <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
+          <path fill="#3b82f6" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="currentColor" d="M36 20 44 34 28 44z"/>
+          <circle cx="32" cy="32" r="3" fill="currentColor"/>
+          <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
+          <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
+        </svg>
+      </div>
       <div class="header">
-        <span>🧭</span>
+        <svg class="aicus-icon" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+          <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
+          <path fill="#3b82f6" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="currentColor" d="M36 20 44 34 28 44z"/>
+          <circle cx="32" cy="32" r="3" fill="currentColor"/>
+          <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
+          <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
+        </svg>
         <span class="title">aicus</span>
         <div class="controls">
           <button class="control-btn collapse-btn" title="접기/펼치기">−</button>
-          <button class="control-btn minimize-btn" title="최소화">□</button>
+          <button class="control-btn minimize-btn" title="최소화">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <rect x="2" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="2" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+          </button>
           <button class="control-btn close-btn" title="닫기">×</button>
         </div>
       </div>
@@ -376,8 +376,8 @@ class AicusNavigator {
 
     // 컨트롤 버튼
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
-    minimizeBtn.addEventListener('click', () => this.toggleMinimize());
     closeBtn.addEventListener('click', () => this.hide());
+    minimizeBtn.addEventListener('click', () => this.toggleMinimize());
     minimizedIcon.addEventListener('click', () => this.toggleMinimize());
   }
 
@@ -496,12 +496,7 @@ class AicusNavigator {
 
     const questionsHTML = this.questions.map(question => `
       <div class="question-item" data-index="${question.index}">
-        <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
-        <div class="question-meta">
-          <span class="question-index">#${question.index}</span>
-          <span style="font-size: 10px; color: #666;">${question.selector}</span>
-          <span>${question.text.length}자</span>
-        </div>
+        <div class="question-text">${this.escapeHtml(question.text.substring(0, 120))}${question.text.length > 120 ? '...' : ''}</div>
       </div>
     `).join('');
 
