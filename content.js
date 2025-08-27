@@ -410,134 +410,72 @@ class AicusNavigator {
   }
 
   scanForQuestions() {
-    const questions = [];
-    let questionSelectors = [];
-
     // 디버깅을 위한 로그
-    console.log('🧭 aicus: Scanning for questions on', window.location.hostname);
+    console.log('🧭 aicus: Scanning for USER questions only on', window.location.hostname);
 
-    // 사이트별 선택자 정의 (더 포괄적으로)
+    let userMessages = [];
+
+    // 사이트별로 사용자 메시지 컨테이너만 찾기 (AI 응답 제외)
     if (window.location.hostname.includes('openai.com') || window.location.hostname.includes('chatgpt.com')) {
-      questionSelectors = [
-        '[data-message-author-role="user"] .whitespace-pre-wrap',
-        '[data-message-author-role="user"]',
-        '.text-message[data-message-author-role="user"]',
-        '.user-message .whitespace-pre-wrap',
-        '.user-message'
-      ];
+      // ChatGPT: 사용자 메시지만 (assistant 메시지 제외)
+      userMessages = Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
     } else if (window.location.hostname.includes('claude.ai')) {
-      questionSelectors = [
-        // 최신 Claude.ai 선택자들 (2025년 8월 기준)
-        '[data-testid="user-message"]',
-        '[data-testid="user-message"] div',
-        '[data-testid="user-message"] p',
-        '.font-user-message',
-        '[data-is-streaming="false"] .font-user-message',
-        '.content .font-user-message',
-        '.text-sm.whitespace-pre-wrap',
-        '.prose .whitespace-pre-wrap',
-        '.break-words.whitespace-pre-wrap',
-        'div[data-is-streaming="false"]',
-        // 추가적인 일반 선택자들
-        '.Human',
-        '.human-message',
-        '.user-input',
-        '.question',
-        '[role="user"]',
-        '.message-user'
-      ];
+      // Claude: 사용자 메시지만 찾기 (data-testid="user-message"만)
+      // AI 응답은 다른 testid를 가지므로 제외됨
+      userMessages = Array.from(document.querySelectorAll('[data-testid="user-message"]'));
+      console.log('🧭 aicus: Found user message containers:', userMessages.length);
     }
 
-    console.log('🧭 aicus: Using selectors:', questionSelectors);
+    // 페이지 상에서의 실제 위치 순서대로 정렬 (위→아래)
+    userMessages.sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      
+      // Y 좌표로 정렬 (위에 있는 것이 먼저)
+      if (Math.abs(rectA.top - rectB.top) > 10) {
+        return rectA.top - rectB.top;
+      }
+      
+      // Y가 비슷하면 DOM 순서로
+      const position = a.compareDocumentPosition(b);
+      return (position & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+    });
 
-    // 모든 선택자로 질문 찾기
-    questionSelectors.forEach((selector, selectorIndex) => {
-      try {
-        const elements = document.querySelectorAll(selector);
-        console.log(`🧭 aicus: Selector "${selector}" found ${elements.length} elements`);
+    console.log('🧭 aicus: Sorted user messages by position');
+
+    // 각 사용자 메시지에서 텍스트 추출
+    const questions = [];
+    userMessages.forEach((container, index) => {
+      let text = '';
+      
+      if (window.location.hostname.includes('claude.ai')) {
+        // Claude: p 태그의 텍스트 우선, 없으면 전체 컨테이너
+        const pElement = container.querySelector('p.whitespace-pre-wrap');
+        if (pElement) {
+          text = pElement.textContent?.trim() || '';
+        } else {
+          text = container.textContent?.trim() || '';
+        }
+      } else if (window.location.hostname.includes('openai.com') || window.location.hostname.includes('chatgpt.com')) {
+        // ChatGPT: 전체 컨테이너의 텍스트
+        text = container.textContent?.trim() || '';
+      }
+
+      // 유효한 사용자 질문인지 확인
+      if (text && text.length > 3 && text.length < 10000) {
+        console.log(`🧭 aicus: User Question #${index + 1}:`, text.substring(0, 100) + (text.length > 100 ? '...' : ''));
         
-        elements.forEach((element, elementIndex) => {
-          const text = element.textContent?.trim();
-          if (text && text.length > 5 && !questions.some(q => q.text === text)) {
-            console.log(`🧭 aicus: Found question text:`, text.substring(0, 50) + '...');
-            questions.push({
-              text: text,
-              element: element,
-              index: questions.length + 1,
-              selector: selector
-            });
-          }
+        questions.push({
+          text: text,
+          element: container,
+          index: index + 1,
+          selector: window.location.hostname.includes('claude.ai') ? '[data-testid="user-message"]' : '[data-message-author-role="user"]'
         });
-      } catch (e) {
-        console.log('🧭 aicus: Selector error:', selector, e);
       }
     });
 
-    // Claude.ai에서 특별한 패턴 찾기
-    if (window.location.hostname.includes('claude.ai') && questions.length === 0) {
-      console.log('🧭 aicus: Trying alternative Claude detection methods...');
-      
-      // 모든 div 요소에서 사용자 메시지 패턴 찾기
-      const allDivs = document.querySelectorAll('div');
-      console.log(`🧭 aicus: Checking ${allDivs.length} div elements`);
-      
-      allDivs.forEach((div, index) => {
-        const text = div.textContent?.trim();
-        
-        // 다양한 조건으로 사용자 메시지 감지
-        if (text && text.length > 10 && text.length < 5000) {
-          const hasUserIndicators = (
-            div.classList.contains('font-user-message') ||
-            div.dataset.testid === 'user-message' ||
-            div.closest('[data-testid="user-message"]') ||
-            text.match(/^(안녕|hello|질문|문의|어떻게|왜|언제|무엇|how|what|why|when|where|can you|could you)/i)
-          );
-          
-          if (hasUserIndicators && !questions.some(q => q.text === text)) {
-            console.log(`🧭 aicus: Found user message via pattern:`, text.substring(0, 50) + '...');
-            questions.push({
-              text: text,
-              element: div,
-              index: questions.length + 1,
-              selector: 'pattern-match'
-            });
-          }
-        }
-      });
-    }
-
-    // 일반적인 질문 패턴도 찾기 (모든 사이트에서)
-    if (questions.length === 0) {
-      console.log('🧭 aicus: Trying general question pattern detection...');
-      
-      const allTextElements = document.querySelectorAll('p, div, span');
-      console.log(`🧭 aicus: Checking ${allTextElements.length} text elements for question patterns`);
-      
-      allTextElements.forEach(element => {
-        const text = element.textContent?.trim();
-        if (text && text.length > 15 && text.length < 2000) {
-          // 질문 패턴 감지
-          const hasQuestionMark = text.includes('?') || text.includes('？');
-          const hasQuestionWords = text.match(/^(어떻게|왜|언제|무엇|어디서|누가|얼마나|how|what|why|when|where|who|which|can|could|would|should|do|does|is|are|will)/i);
-          
-          if ((hasQuestionMark || hasQuestionWords) && !questions.some(q => q.text === text)) {
-            const parent = element.closest('[role="presentation"], .message, .conversation-turn, [data-testid="user-message"]');
-            if (parent || hasQuestionMark) {
-              console.log(`🧭 aicus: Found question via pattern:`, text.substring(0, 50) + '...');
-              questions.push({
-                text: text,
-                element: element,
-                index: questions.length + 1,
-                selector: 'question-pattern'
-              });
-            }
-          }
-        }
-      });
-    }
-
-    console.log(`🧭 aicus: Total questions found: ${questions.length}`);
-    this.questions = questions.slice(0, 50); // 최대 50개로 제한
+    console.log(`🧭 aicus: Total USER questions found: ${questions.length}`);
+    this.questions = questions;
     this.updateQuestionsList();
   }
 
