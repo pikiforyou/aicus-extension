@@ -453,12 +453,14 @@ class AicusNavigator {
 
     // 드래그 기능
     let isDragging = false;
+    let dragMoved = false; // 드래그로 실제 이동했는지 체크
     let startX, startY, startLeft, startTop;
 
     const startDrag = (e) => {
       if (e.target.closest('.controls') || e.target.closest('.resize-handle')) return;
       
       isDragging = true;
+      dragMoved = false; // 드래그 시작 시 이동 플래그 초기화
       startX = e.clientX;
       startY = e.clientY;
       const rect = this.container.getBoundingClientRect();
@@ -475,6 +477,11 @@ class AicusNavigator {
       
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
+      
+      // 일정 거리 이상 이동했을 때만 dragMoved = true
+      if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+        dragMoved = true;
+      }
       
       // 최소화 상태일 때는 60px 기준으로 계산
       const containerWidth = this.isMinimized ? 60 : 320;
@@ -494,7 +501,17 @@ class AicusNavigator {
     };
 
     header.addEventListener('mousedown', startDrag);
+    
+    // 최소화 아이콘에는 별도의 이벤트 리스너
     minimizedIcon.addEventListener('mousedown', startDrag);
+    minimizedIcon.addEventListener('click', (e) => {
+      // 드래그로 이동하지 않았을 때만 복원
+      if (!dragMoved) {
+        this.toggleMinimize();
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    });
 
     // 리사이즈 기능
     let isResizing = false;
@@ -537,7 +554,7 @@ class AicusNavigator {
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
     closeBtn.addEventListener('click', () => this.hide());
     minimizeBtn.addEventListener('click', () => this.toggleMinimize());
-    minimizedIcon.addEventListener('click', () => this.toggleMinimize());
+    // minimizedIcon 클릭은 위에서 처리
     settingsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.toggleSettings();
