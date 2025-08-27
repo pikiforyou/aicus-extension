@@ -92,8 +92,9 @@ class AicusNavigator {
       }
 
       .navigator.minimized {
-        width: 60px;
-        height: 60px;
+        width: 60px !important;
+        height: 60px !important;
+        max-height: 60px !important;
       }
 
       .header {
@@ -193,11 +194,12 @@ class AicusNavigator {
       }
 
       .question-item {
-        padding: 8px 16px;
+        padding: 12px 16px;
         border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
         cursor: pointer;
-        transition: background 0.2s ease;
+        transition: all 0.2s ease;
         position: relative;
+        margin-bottom: 2px;
       }
 
       .dark .question-item {
@@ -205,25 +207,25 @@ class AicusNavigator {
       }
 
       .question-item:hover {
-        background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+        background: var(--hover-bg, rgba(0, 0, 0, 0.05)) !important;
+        transform: translateX(2px);
       }
 
       .dark .question-item:hover {
-        background: var(--hover-bg, rgba(255, 255, 255, 0.05));
+        background: var(--hover-bg, rgba(255, 255, 255, 0.05)) !important;
       }
 
       .question-text {
         font-size: 13px;
-        line-height: 1.35;
+        line-height: 1.4;
         color: #333;
+        padding: 4px 0;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        padding: 4px 0;
-        word-break: break-word;
-        hyphens: auto;
+        max-width: 100%;
       }
 
       .dark .question-text {
@@ -370,7 +372,7 @@ class AicusNavigator {
           <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
           <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
         </svg>
-        <span class="title">aicus</span>
+        <span class="title">Aicus</span>
         <div class="controls">
           <button class="control-btn collapse-btn" title="접기/펼치기">−</button>
           <button class="control-btn minimize-btn" title="최소화">
@@ -690,11 +692,18 @@ class AicusNavigator {
     const navigator = this.shadowRoot.querySelector('.navigator');
     
     if (this.isMinimized) {
+      // 최소화 시 항상 고정 크기로 리셋
       navigator.classList.add('minimized');
+      navigator.style.width = '';  // 인라인 스타일 제거
+      navigator.style.height = '';
+      navigator.style.maxHeight = '';
       this.showSettings = false; // 최소화 시 설정 닫기
       navigator.classList.remove('show-settings');
     } else {
       navigator.classList.remove('minimized');
+      // 원래 크기로 복원 (기본값)
+      navigator.style.width = '320px';
+      navigator.style.maxHeight = '80vh';
     }
   }
 
@@ -742,12 +751,16 @@ class AicusNavigator {
     const headerBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.08)`;
     const borderColor = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
     const settingsBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.05)`;
-    const hoverBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.1)`;
+    const hoverBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
     
     navigator.style.setProperty('--header-bg', headerBg);
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
+    
+    console.log(`🎨 Applied color scheme: ${this.settings.accentColor}`, {
+      headerBg, borderColor, settingsBg, hoverBg
+    });
   }
 
   hexToRgb(hex) {
