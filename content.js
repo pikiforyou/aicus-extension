@@ -16,8 +16,9 @@ class AicusNavigator {
       theme: 'auto' // auto, light, dark
     };
     
-    // 팬톤 파스텔 컬러 팔레트
+    // 팬톤 파스텔 + 쨍한 컬러 팔레트 (12개 파스텔 + 6개 비비드)
     this.colorPalette = [
+      // 파스텔 색상 (기존)
       { name: 'Blue', color: '#3b82f6' }, // 기본값
       { name: 'Lavender', color: '#BCBAE6' },
       { name: 'Mint Green', color: '#AFE6AC' },
@@ -29,7 +30,14 @@ class AicusNavigator {
       { name: 'Soft Coral', color: '#FF9999' },
       { name: 'Sage Green', color: '#B2D3B2' },
       { name: 'Powder Blue', color: '#B8D4E3' },
-      { name: 'Cream', color: '#F5F5DC' }
+      { name: 'Cream', color: '#F5F5DC' },
+      // 쨍한 비비드 색상 (팬톤 2024-2025 트렌드)
+      { name: 'Viva Magenta', color: '#BE3455' }, // 2023 올해의 색상
+      { name: 'Electric Blue', color: '#0066CC' }, // 일렉트릭 블루
+      { name: 'Vibrant Orange', color: '#FF5722' }, // 레드 오렌지
+      { name: 'Emerald Green', color: '#00A86B' }, // 에메랄드
+      { name: 'Italian Plum', color: '#5D4E75' }, // 이탈리안 플럼
+      { name: 'Living Coral', color: '#FF6F61' } // 리빙 코랄
     ];
     
     this.init();
@@ -197,22 +205,25 @@ class AicusNavigator {
       }
 
       .question-item:hover {
-        background: rgba(0, 0, 0, 0.05);
+        background: var(--hover-bg, rgba(0, 0, 0, 0.05));
       }
 
       .dark .question-item:hover {
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--hover-bg, rgba(255, 255, 255, 0.05));
       }
 
       .question-text {
         font-size: 13px;
-        line-height: 1.4;
+        line-height: 1.35;
         color: #333;
+        overflow: hidden;
+        text-overflow: ellipsis;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
-        overflow: hidden;
         padding: 4px 0;
+        word-break: break-word;
+        hyphens: auto;
       }
 
       .dark .question-text {
@@ -280,7 +291,7 @@ class AicusNavigator {
       .color-palette {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
-        gap: 8px;
+        gap: 6px;
         margin-bottom: 16px;
       }
 
@@ -731,10 +742,12 @@ class AicusNavigator {
     const headerBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.08)`;
     const borderColor = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
     const settingsBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.05)`;
+    const hoverBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.1)`;
     
     navigator.style.setProperty('--header-bg', headerBg);
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
+    navigator.style.setProperty('--hover-bg', hoverBg);
   }
 
   hexToRgb(hex) {
