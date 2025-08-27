@@ -1,4 +1,4 @@
-// aicus - 채팅 네비게이터
+// aicus - 채팅 네비게이터 (플로팅 + 호버 미리보기)
 class AicusNavigator {
   constructor() {
     this.isVisible = false;
@@ -9,18 +9,19 @@ class AicusNavigator {
     this.container = null;
     this.observer = null;
     this.questions = [];
+    this.previewTooltip = null;
     
     // 설정값 (로컬 스토리지 대신 메모리에 저장)
     this.settings = {
-      accentColor: '#3b82f6',
+      accentColor: '#BCBAE6', // Lavender로 기본값 변경
       theme: 'auto' // auto, light, dark
     };
     
     // 팬톤 파스텔 + 쨍한 컬러 팔레트 (12개 파스텔 + 6개 비비드)
     this.colorPalette = [
       // 파스텔 색상 (기존)
-      { name: 'Blue', color: '#3b82f6' }, // 기본값
-      { name: 'Lavender', color: '#BCBAE6' },
+      { name: 'Lavender', color: '#BCBAE6' }, // 기본값으로 이동
+      { name: 'Blue', color: '#3b82f6' },
       { name: 'Mint Green', color: '#AFE6AC' },
       { name: 'Sky Blue', color: '#C3E9DB' },
       { name: 'Soft Yellow', color: '#F0F0B1' },
@@ -56,7 +57,7 @@ class AicusNavigator {
     this.container.id = 'aicus-navigator';
     this.container.style.cssText = `
       position: fixed;
-      top: 20px;
+      top: 80px;
       right: 20px;
       z-index: 10000;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -83,6 +84,7 @@ class AicusNavigator {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         transition: all 0.3s ease;
         overflow: hidden;
+        transform-origin: top right; /* 오른쪽 위를 기준으로 변형 */
       }
 
       .navigator.dark {
@@ -95,6 +97,8 @@ class AicusNavigator {
         width: 60px !important;
         height: 60px !important;
         max-height: 60px !important;
+        overflow: hidden !important;
+        transform-origin: top right; /* 최소화 시에도 오른쪽 위 기준 */
       }
 
       .header {
@@ -251,7 +255,8 @@ class AicusNavigator {
 
       .navigator.minimized .header,
       .navigator.minimized .content,
-      .navigator.minimized .resize-handle {
+      .navigator.minimized .resize-handle,
+      .navigator.minimized .settings-panel {
         display: none;
       }
 
@@ -329,6 +334,37 @@ class AicusNavigator {
         text-shadow: 0 1px 2px rgba(0,0,0,0.5);
       }
 
+      /* 호버 미리보기 툴팁 */
+      .preview-tooltip {
+        position: absolute;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        max-width: 300px;
+        word-wrap: break-word;
+        z-index: 10001;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(-5px);
+        transition: all 0.2s ease;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        white-space: pre-wrap;
+      }
+
+      .preview-tooltip.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .dark .preview-tooltip {
+        background: rgba(255, 255, 255, 0.95);
+        color: #333;
+        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
+      }
+
       @media (prefers-color-scheme: dark) {
         .navigator {
           background: rgba(30, 30, 30, 0.95);
@@ -343,6 +379,7 @@ class AicusNavigator {
 
     this.createNavigatorHTML();
     this.setupEventListeners();
+    this.createPreviewTooltip();
   }
 
   createNavigatorHTML() {
@@ -356,7 +393,7 @@ class AicusNavigator {
       <div class="minimized-icon">
         <svg class="aicus-icon" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true">
           <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
-          <path fill="var(--accent-color, #3b82f6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="var(--accent-color, #BCBAE6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
           <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
@@ -366,7 +403,7 @@ class AicusNavigator {
       <div class="header">
         <svg class="aicus-icon settings-btn" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true" style="cursor: pointer;" title="설정">
           <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="6"/>
-          <path fill="var(--accent-color, #3b82f6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+          <path fill="var(--accent-color, #BCBAE6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
           <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
@@ -397,6 +434,12 @@ class AicusNavigator {
     this.shadowRoot.appendChild(navigator);
     this.updateColorPalette();
     this.applyColorScheme();
+  }
+
+  createPreviewTooltip() {
+    this.previewTooltip = document.createElement('div');
+    this.previewTooltip.className = 'preview-tooltip';
+    this.shadowRoot.appendChild(this.previewTooltip);
   }
 
   setupEventListeners() {
@@ -433,8 +476,14 @@ class AicusNavigator {
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
       
-      this.container.style.left = Math.max(0, Math.min(window.innerWidth - 320, startLeft + deltaX)) + 'px';
-      this.container.style.top = Math.max(0, Math.min(window.innerHeight - 100, startTop + deltaY)) + 'px';
+      // 최소화 상태일 때는 60px 기준으로 계산
+      const containerWidth = this.isMinimized ? 60 : 320;
+      
+      const newLeft = Math.max(0, Math.min(window.innerWidth - containerWidth, startLeft + deltaX));
+      const newTop = Math.max(0, Math.min(window.innerHeight - 100, startTop + deltaY));
+      
+      this.container.style.left = newLeft + 'px';
+      this.container.style.top = newTop + 'px';
       this.container.style.right = 'auto';
     };
 
@@ -512,7 +561,6 @@ class AicusNavigator {
       });
 
       if (shouldRescan) {
-        // 디바운스를 위해 잠시 대기
         clearTimeout(this.rescanTimeout);
         this.rescanTimeout = setTimeout(() => {
           this.scanForQuestions();
@@ -581,6 +629,7 @@ class AicusNavigator {
         
         questions.push({
           text: text,
+          fullText: text, // 호버 시 표시할 전체 텍스트 (100자까지)
           element: container,
           index: index + 1,
           selector: window.location.hostname.includes('claude.ai') ? '[data-testid="user-message"]' : '[data-message-author-role="user"]'
@@ -609,15 +658,16 @@ class AicusNavigator {
     }
 
     const questionsHTML = this.questions.map(question => `
-      <div class="question-item" data-index="${question.index}">
+      <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
     `).join('');
 
     content.innerHTML = questionsHTML;
 
-    // 클릭 이벤트 추가
+    // 클릭 이벤트 및 호버 이벤트 추가
     content.querySelectorAll('.question-item').forEach(item => {
+      // 클릭 이벤트
       item.addEventListener('click', () => {
         const index = parseInt(item.dataset.index);
         const question = this.questions.find(q => q.index === index);
@@ -625,9 +675,50 @@ class AicusNavigator {
           this.scrollToQuestion(question.element);
         }
       });
+
+      // 호버 이벤트 (미리보기)
+      item.addEventListener('mouseenter', (e) => this.showPreview(e, item));
+      item.addEventListener('mouseleave', () => this.hidePreview());
+      item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
     });
 
     console.log(`🧭 aicus: Updated questions list with ${this.questions.length} items`);
+  }
+
+  showPreview(e, item) {
+    const fullText = item.dataset.fullText;
+    if (!fullText || fullText.length <= 80) return; // 짧은 텍스트는 미리보기 안함
+
+    this.previewTooltip.textContent = fullText;
+    this.previewTooltip.classList.add('show');
+    this.updatePreviewPosition(e);
+  }
+
+  hidePreview() {
+    this.previewTooltip.classList.remove('show');
+  }
+
+  updatePreviewPosition(e) {
+    if (!this.previewTooltip.classList.contains('show')) return;
+
+    const rect = this.container.getBoundingClientRect();
+    const tooltipRect = this.previewTooltip.getBoundingClientRect();
+    
+    // 마우스 위치 기준으로 툴팁 위치 계산
+    let left = e.clientX - rect.left + 10;
+    let top = e.clientY - rect.top - tooltipRect.height - 10;
+
+    // 화면 경계 체크
+    if (left + tooltipRect.width > rect.width) {
+      left = e.clientX - rect.left - tooltipRect.width - 10;
+    }
+    
+    if (top < 0) {
+      top = e.clientY - rect.top + 10;
+    }
+
+    this.previewTooltip.style.left = left + 'px';
+    this.previewTooltip.style.top = top + 'px';
   }
 
   scrollToQuestion(element) {
@@ -692,18 +783,47 @@ class AicusNavigator {
     const navigator = this.shadowRoot.querySelector('.navigator');
     
     if (this.isMinimized) {
-      // 최소화 시 항상 고정 크기로 리셋
+      // 현재 스타일과 위치 저장
+      this.savedStyles = {
+        width: navigator.style.width,
+        height: navigator.style.height,
+        maxHeight: navigator.style.maxHeight
+      };
+      
+      // 최소화: 컨테이너를 60px로 고정하고 위치 조정
       navigator.classList.add('minimized');
-      navigator.style.width = '';  // 인라인 스타일 제거
-      navigator.style.height = '';
-      navigator.style.maxHeight = '';
-      this.showSettings = false; // 최소화 시 설정 닫기
+      
+      // 컨테이너 크기를 60px로 설정하고 오른쪽 정렬 유지
+      this.container.style.width = '60px';
+      this.container.style.height = '60px';
+      
+      // 오른쪽 끝에 붙어있을 때도 제대로 최소화되도록 위치 보정
+      const currentRight = parseInt(this.container.style.right) || 20;
+      this.container.style.right = currentRight + 'px';
+      this.container.style.left = 'auto';
+      
+      this.showSettings = false;
       navigator.classList.remove('show-settings');
+      this.hidePreview();
     } else {
+      // 복원: 저장된 스타일 복구
       navigator.classList.remove('minimized');
-      // 원래 크기로 복원 (기본값)
-      navigator.style.width = '320px';
-      navigator.style.maxHeight = '80vh';
+      
+      // 복원 시 컨테이너가 오른쪽으로 늘어나지 않도록 위치 조정
+      const currentRight = parseInt(this.container.style.right) || 20;
+      const targetWidth = parseInt(this.savedStyles?.width) || 320;
+      
+      // 오른쪽 끝에서 왼쪽으로 펼쳐지도록 조정
+      this.container.style.width = 'auto';
+      this.container.style.height = 'auto';
+      this.container.style.right = currentRight + 'px';
+      this.container.style.left = 'auto';
+      
+      if (this.savedStyles) {
+        navigator.style.width = this.savedStyles.width || '320px';
+        navigator.style.height = this.savedStyles.height || '';
+        navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
+      }
     }
   }
 
@@ -769,7 +889,7 @@ class AicusNavigator {
       r: parseInt(result[1], 16),
       g: parseInt(result[2], 16),
       b: parseInt(result[3], 16)
-    } : { r: 59, g: 130, b: 246 }; // 기본값
+    } : { r: 188, g: 186, b: 230 }; // 라벤더 기본값
   }
 
   show() {
@@ -783,6 +903,7 @@ class AicusNavigator {
     if (this.container) {
       this.container.style.display = 'none';
       this.isVisible = false;
+      this.hidePreview(); // 숨김 시 미리보기도 제거
     }
   }
 
