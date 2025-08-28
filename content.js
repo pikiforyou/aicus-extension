@@ -629,8 +629,6 @@ class AicusNavigator {
   }
 
   scanForQuestions() {
-    console.log('🧭 aicus: Scanning for USER questions only on', window.location.hostname);
-
     let userMessages = [];
 
     // 사이트별로 사용자 메시지 컨테이너만 찾기
@@ -638,7 +636,19 @@ class AicusNavigator {
       userMessages = Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
     } else if (window.location.hostname.includes('claude.ai')) {
       userMessages = Array.from(document.querySelectorAll('[data-testid="user-message"]'));
-      console.log('🧭 aicus: Found user message containers:', userMessages.length);
+    } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
+      const root =
+        document.querySelector('main[role="main"]') ||
+        document.querySelector('[aria-label="Chat history"]') ||
+        document.body;
+    
+      const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
+
+      userMessages = bubbles.map(bubble =>
+        bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
+      );
+
+      userMessages = Array.from(new Set(userMessages));
     }
 
     // 위→아래 순서로 정렬
@@ -668,11 +678,21 @@ class AicusNavigator {
         }
       } else if (window.location.hostname.includes('openai.com') || window.location.hostname.includes('chatgpt.com')) {
         text = container.textContent?.trim() || '';
+      } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
+        // Gemini/Bard 텍스트 추출
+        text = container.textContent?.trim() || '';
+        
+        // 추가적으로 내부 텍스트 요소들도 확인
+        const textElements = container.querySelectorAll('p, div, span');
+        if (!text && textElements.length > 0) {
+          text = Array.from(textElements)
+            .map(el => el.textContent?.trim())
+            .filter(t => t && t.length > 5)
+            .join(' ');
+        }
       }
 
-      if (text && text.length > 3 && text.length < 10000) {
-        console.log(`🧭 aicus: User Question #${index + 1}:`, text.substring(0, 100) + (text.length > 100 ? '...' : ''));
-        
+      if (text && text.length > 3 && text.length < 10000) {      
         questions.push({
           text: text,
           fullText: text,
@@ -682,7 +702,6 @@ class AicusNavigator {
       }
     });
 
-    console.log(`🧭 aicus: Total USER questions found: ${questions.length}`);
     this.questions = questions;
     this.updateQuestionsList();
   }
@@ -695,7 +714,8 @@ class AicusNavigator {
         <div class="empty-state">
           <div style="margin-bottom: 8px;">질문을 찾을 수 없습니다.</div>
           <div style="font-size: 11px; color: #999;">
-            콘솔을 확인해주세요 (F12 → Console)
+            문제가 계속되면 문의주세요
+            <a href="mailto:pikiforyou@gmail.com">pikiforyou@gmail.com</a>
           </div>
         </div>
       `;
@@ -725,8 +745,6 @@ class AicusNavigator {
       item.addEventListener('mouseleave', () => this.hidePreview());
       item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
     });
-
-    console.log(`🧭 aicus: Updated questions list with ${this.questions.length} items`);
   }
 
   showPreview(e, item) {
@@ -876,9 +894,9 @@ class AicusNavigator {
     
     colorPalette.innerHTML = this.colorPalette.map(color => `
       <div class="color-option ${color.color === this.settings.accentColor ? 'selected' : ''}" 
-           style="background-color: ${color.color};" 
-           data-color="${color.color}"
-           title="${color.name}">
+          style="background-color: ${color.color};" 
+          data-color="${color.color}"
+          title="${color.name}">
       </div>
     `).join('');
 
@@ -907,9 +925,6 @@ class AicusNavigator {
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
-    
-    // 스크롤바는 일단 기본 회색으로 두고, 다른 UI 요소들만 색상 통일
-    console.log(`🎨 Applied color scheme: ${this.settings.accentColor}`);
   }
 
   hexToRgb(hex) {

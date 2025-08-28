@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "aicus",
+  "name": "Aicus",
   "version": "1.0.0",
-  "description": "채팅 기록에서 질문/답변으로 쉽게 이동할 수 있는 플로팅 리스트",
+  "description": "채팅 기록에서 질문/답변으로 쉽게 이동할 수 있는 플로팅 리스트. GPT, Claude, Gemini 지원",
   "permissions": [
     "activeTab"
   ],
@@ -11,7 +11,10 @@
       "matches": [
         "https://chat.openai.com/*",
         "https://claude.ai/*",
-        "https://chatgpt.com/*"
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://gemini.google.com/app*",
+        "https://bard.google.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_end"
