@@ -1,4 +1,4 @@
-// aicus - 채팅 네비게이터 (최종 완성 버전)
+// aicus - 채팅 네비게이터 (Gemini 선택자 개선 버전)
 class AicusNavigator {
   constructor() {
     this.isVisible = false;
@@ -637,17 +637,19 @@ class AicusNavigator {
     } else if (window.location.hostname.includes('claude.ai')) {
       userMessages = Array.from(document.querySelectorAll('[data-testid="user-message"]'));
     } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
-      const root =
-        document.querySelector('main[role="main"]') ||
-        document.querySelector('[aria-label="Chat history"]') ||
-        document.body;
-    
+      // Gemini - 개선된 선택자 사용
+      const root = document.querySelector('main[role="main"]') || document.body;
+      
+      // 사용자 질문 버블 컨테이너 찾기
       const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
+      
+      // 각 버블에서 실제 텍스트 요소 추출
+      userMessages = bubbles.map(bubble => {
+        // query-text-line 또는 query-text 클래스를 가진 실제 텍스트 요소 찾기
+        return bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble;
+      });
 
-      userMessages = bubbles.map(bubble =>
-        bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
-      );
-
+      // 중복 제거
       userMessages = Array.from(new Set(userMessages));
     }
 
