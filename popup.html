@@ -119,13 +119,6 @@
   
   <button class="btn" id="refresh-btn">페이지 새로고침</button>
   
-  <script>
-    document.getElementById('refresh-btn').addEventListener('click', () => {
-      chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-        chrome.tabs.reload(tabs[0].id);
-        window.close();
-      });
-    });
-  </script>
+  <script src="popup.js"></script>
 </body>
 </html>
