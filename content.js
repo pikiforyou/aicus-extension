@@ -896,9 +896,9 @@ class AicusNavigator {
     
     colorPalette.innerHTML = this.colorPalette.map(color => `
       <div class="color-option ${color.color === this.settings.accentColor ? 'selected' : ''}" 
-          style="background-color: ${color.color};" 
-          data-color="${color.color}"
-          title="${color.name}">
+           style="background-color: ${color.color};" 
+           data-color="${color.color}"
+           title="${color.name}">
       </div>
     `).join('');
 
