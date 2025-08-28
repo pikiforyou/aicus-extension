@@ -199,10 +199,19 @@ class AicusNavigator {
       .content::-webkit-scrollbar-thumb {
         background: rgba(0, 0, 0, 0.2);
         border-radius: 3px;
+        transition: background 0.2s ease;
+      }
+
+      .content::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.3);
       }
 
       .dark .content::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.2);
+      }
+
+      .dark .content::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
       }
 
       .question-item {
@@ -899,6 +908,7 @@ class AicusNavigator {
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
     
+    // 스크롤바는 일단 기본 회색으로 두고, 다른 UI 요소들만 색상 통일
     console.log(`🎨 Applied color scheme: ${this.settings.accentColor}`);
   }
 
