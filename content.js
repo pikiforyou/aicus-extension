@@ -1,4 +1,4 @@
-// aicus - 채팅 네비게이터 (Gemini 선택자 개선 버전)
+// aicus - 채팅 네비게이터 (최종 완성 버전)
 class AicusNavigator {
   constructor() {
     this.isVisible = false;
@@ -76,6 +76,7 @@ class AicusNavigator {
       .navigator {
         width: 320px;
         max-height: 80vh;
+        min-height: auto;
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(0, 0, 0, 0.1);
@@ -179,13 +180,17 @@ class AicusNavigator {
       }
 
       .content {
-        max-height: calc(80vh - 120px);
-        overflow-y: auto;
+        max-height: 300px;
+        overflow-y: hidden;
         padding: 8px 0;
       }
 
+      .content.scrollable {
+        overflow-y: auto;
+      }
+
       .navigator.show-settings .content {
-        max-height: calc(80vh - 200px);
+        max-height: 250px;
       }
 
       .content::-webkit-scrollbar {
@@ -450,6 +455,9 @@ class AicusNavigator {
     this.shadowRoot.appendChild(navigator);
     this.updateColorPalette();
     this.applyColorScheme();
+    
+    // 초기 컨텐츠 높이 설정
+    setTimeout(() => this.updateContentHeight(), 0);
   }
 
   createPreviewTooltip() {
@@ -541,8 +549,15 @@ class AicusNavigator {
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
       
-      navigator.style.width = Math.max(250, Math.min(500, startWidth + deltaX)) + 'px';
-      navigator.style.maxHeight = Math.max(200, Math.min(window.innerHeight * 0.9, startHeight + deltaY)) + 'px';
+      const newWidth = Math.max(250, Math.min(500, startWidth + deltaX));
+      const newHeight = Math.max(200, Math.min(window.innerHeight * 0.9, startHeight + deltaY));
+      
+      navigator.style.width = newWidth + 'px';
+      navigator.style.maxHeight = newHeight + 'px';
+      // height는 설정하지 않음 - 컨텐츠에 맞게 자동 조절되도록
+      
+      // 컨텐츠 영역 높이 동적 조정
+      this.updateContentHeight();
     };
 
     const stopResize = () => {
@@ -637,19 +652,17 @@ class AicusNavigator {
     } else if (window.location.hostname.includes('claude.ai')) {
       userMessages = Array.from(document.querySelectorAll('[data-testid="user-message"]'));
     } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
-      // Gemini - 개선된 선택자 사용
-      const root = document.querySelector('main[role="main"]') || document.body;
-      
-      // 사용자 질문 버블 컨테이너 찾기
+      const root =
+        document.querySelector('main[role="main"]') ||
+        document.querySelector('[aria-label="Chat history"]') ||
+        document.body;
+    
       const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
-      
-      // 각 버블에서 실제 텍스트 요소 추출
-      userMessages = bubbles.map(bubble => {
-        // query-text-line 또는 query-text 클래스를 가진 실제 텍스트 요소 찾기
-        return bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble;
-      });
 
-      // 중복 제거
+      userMessages = bubbles.map(bubble =>
+        bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
+      );
+
       userMessages = Array.from(new Set(userMessages));
     }
 
@@ -747,6 +760,9 @@ class AicusNavigator {
       item.addEventListener('mouseleave', () => this.hidePreview());
       item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
     });
+    
+    // 질문 목록 업데이트 후 스크롤 필요성 체크
+    this.checkScrollNeed();
   }
 
   showPreview(e, item) {
@@ -842,8 +858,8 @@ class AicusNavigator {
       // 현재 스타일 저장
       this.savedStyles = {
         width: navigator.style.width,
-        height: navigator.style.height,
         maxHeight: navigator.style.maxHeight
+        // height는 저장하지 않음
       };
       
       // 최소화: 네비게이터와 컨테이너 모두 60px로 강제 변경
@@ -874,8 +890,11 @@ class AicusNavigator {
       
       if (this.savedStyles) {
         navigator.style.width = this.savedStyles.width || '320px';
-        navigator.style.height = this.savedStyles.height || '';
+        // height는 복원하지 않음 - 자동으로 컨텐츠에 맞게 조절
         navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
+        
+        // 복원 후 컨텐츠 높이 재조정
+        setTimeout(() => this.updateContentHeight(), 0);
       }
     }
   }
@@ -889,6 +908,53 @@ class AicusNavigator {
     } else {
       navigator.classList.remove('show-settings');
     }
+    
+    // 설정 패널 토글 후 컨텐츠 높이 재조정
+    setTimeout(() => this.updateContentHeight(), 0);
+  }
+
+  updateContentHeight() {
+    const navigator = this.shadowRoot.querySelector('.navigator');
+    const content = this.shadowRoot.querySelector('.content');
+    const header = this.shadowRoot.querySelector('.header');
+    const settingsPanel = this.shadowRoot.querySelector('.settings-panel');
+    
+    if (!navigator || !content || !header) return;
+    
+    // navigator의 maxHeight에서 다른 요소들의 높이를 빼서 계산
+    const navigatorMaxHeight = parseInt(navigator.style.maxHeight) || parseInt(getComputedStyle(navigator).maxHeight) || 500;
+    const headerHeight = header.offsetHeight;
+    const settingsHeight = this.showSettings && settingsPanel ? settingsPanel.offsetHeight : 0;
+    const resizeHandleHeight = 16; // 리사이즈 핸들 높이
+    const padding = 20; // 여백
+    
+    const availableHeight = navigatorMaxHeight - headerHeight - settingsHeight - resizeHandleHeight - padding;
+    const minHeight = 100; // 최소 높이
+    
+    const finalHeight = Math.max(minHeight, availableHeight);
+    content.style.maxHeight = finalHeight + 'px';
+    
+    // 스크롤 필요성 체크 및 적용
+    this.checkScrollNeed();
+  }
+
+  checkScrollNeed() {
+    const content = this.shadowRoot.querySelector('.content');
+    if (!content) return;
+    
+    // DOM 업데이트를 기다린 후 체크
+    setTimeout(() => {
+      const contentHeight = content.scrollHeight;
+      const maxHeight = parseInt(content.style.maxHeight) || 300;
+      
+      if (contentHeight > maxHeight) {
+        // 스크롤이 필요한 경우
+        content.classList.add('scrollable');
+      } else {
+        // 스크롤이 필요 없는 경우
+        content.classList.remove('scrollable');
+      }
+    }, 0);
   }
 
   updateColorPalette() {
