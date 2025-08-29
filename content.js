@@ -71,27 +71,36 @@ class AicusNavigator {
     style.textContent = `
       :host {
         all: initial;
+        color-scheme: light;
+      }
+      
+      * {
+        box-sizing: border-box;
       }
       
       .navigator {
         width: 320px;
         max-height: 80vh;
         min-height: auto;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(0, 0, 0, 0.1);
+        background: #ffffff;
+        backdrop-filter: none;
+        border: 1px solid #e5e5e5;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333333;
         transition: all 0.3s ease;
         overflow: hidden;
         transform-origin: top right;
+        isolation: isolate;
       }
 
       .navigator.dark {
-        background: rgba(30, 30, 30, 0.95);
-        border-color: rgba(255, 255, 255, 0.1);
-        color: #fff;
+        background: #1f1f1f;
+        border-color: #404040;
+        color: #ffffff;
       }
 
       .navigator.minimized {
@@ -106,15 +115,15 @@ class AicusNavigator {
         display: flex;
         align-items: center;
         padding: 12px 16px;
-        background: var(--header-bg, rgba(0, 0, 0, 0.05));
-        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        background: var(--header-bg);
+        border-bottom: 1px solid var(--border-color);
         cursor: move;
         user-select: none;
       }
 
       .dark .header {
-        background: var(--header-bg, rgba(255, 255, 255, 0.05));
-        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
+        background: var(--header-bg-dark);
+        border-bottom-color: var(--border-color-dark);
       }
 
       .title {
@@ -221,24 +230,25 @@ class AicusNavigator {
 
       .question-item {
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+        border-bottom: 1px solid var(--border-color);
         cursor: pointer;
         transition: all 0.2s ease;
         position: relative;
         margin-bottom: 2px;
+        background: transparent;
       }
 
       .dark .question-item {
-        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.05));
+        border-bottom-color: var(--border-color-dark);
       }
 
       .question-item:hover {
-        background: var(--hover-bg, rgba(0, 0, 0, 0.05)) !important;
+        background: var(--hover-bg) !important;
         transform: translateX(2px);
       }
 
       .dark .question-item:hover {
-        background: var(--hover-bg, rgba(255, 255, 255, 0.05)) !important;
+        background: var(--hover-bg-dark) !important;
       }
 
       .question-text {
@@ -293,13 +303,13 @@ class AicusNavigator {
       .settings-panel {
         display: none;
         padding: 16px;
-        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
-        background: var(--settings-bg, rgba(0, 0, 0, 0.02));
+        border-bottom: 1px solid var(--border-color);
+        background: var(--settings-bg);
       }
 
       .dark .settings-panel {
-        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
-        background: var(--settings-bg, rgba(255, 255, 255, 0.02));
+        border-bottom-color: var(--border-color-dark);
+        background: var(--settings-bg-dark);
       }
 
       .navigator.show-settings .settings-panel {
@@ -984,15 +994,46 @@ class AicusNavigator {
     navigator.style.setProperty('--accent-color', this.settings.accentColor);
     
     const accentRgb = this.hexToRgb(this.settings.accentColor);
-    const headerBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.08)`;
-    const borderColor = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
-    const settingsBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.05)`;
-    const hoverBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
     
+    // 투명도를 더 낮춰서 원색이 잘 보이게 (더 불투명하게)
+    const headerBg = this.blendWithWhite(accentRgb, 0.10);      // 0.08 → 0.15
+    const borderColor = this.blendWithWhite(accentRgb, 0.3);    // 0.3 → 0.5  
+    const settingsBg = this.blendWithWhite(accentRgb, 0.08);    // 0.05 → 0.08
+    const hoverBg = this.blendWithWhite(accentRgb, 0.25);       // 0.12 → 0.25 (특히 호버 강화)
+    
+    // 다크모드용 색상도 동일하게 강화
+    const headerBgDark = this.blendWithBlack(accentRgb, 0.25);   // 0.15 → 0.25
+    const borderColorDark = this.blendWithBlack(accentRgb, 0.6); // 0.4 → 0.6
+    const settingsBgDark = this.blendWithBlack(accentRgb, 0.15); // 0.1 → 0.15
+    const hoverBgDark = this.blendWithBlack(accentRgb, 0.35);    // 0.2 → 0.35
+    
+    // 라이트 모드
     navigator.style.setProperty('--header-bg', headerBg);
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
+    
+    // 다크 모드
+    navigator.style.setProperty('--header-bg-dark', headerBgDark);
+    navigator.style.setProperty('--border-color-dark', borderColorDark);
+    navigator.style.setProperty('--settings-bg-dark', settingsBgDark);
+    navigator.style.setProperty('--hover-bg-dark', hoverBgDark);
+  }
+
+  blendWithWhite(rgb, alpha) {
+    // 투명도를 적용해서 흰 배경과 블렌딩된 색상 계산
+    const r = Math.round(rgb.r * alpha + 255 * (1 - alpha));
+    const g = Math.round(rgb.g * alpha + 255 * (1 - alpha));
+    const b = Math.round(rgb.b * alpha + 255 * (1 - alpha));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  blendWithBlack(rgb, alpha) {
+    // 투명도를 적용해서 검은 배경과 블렌딩된 색상 계산
+    const r = Math.round(rgb.r * alpha);
+    const g = Math.round(rgb.g * alpha);
+    const b = Math.round(rgb.b * alpha);
+    return `rgb(${r}, ${g}, ${b})`;
   }
 
   hexToRgb(hex) {
