@@ -29,5 +29,11 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "aicus - Chat Navigator"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["docs/daram-qr.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

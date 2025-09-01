@@ -10,6 +10,7 @@ class AicusNavigator {
     this.observer = null;
     this.questions = [];
     this.previewTooltip = null;
+    this.donationModal = null;
     
     // 설정값
     this.settings = {
@@ -317,191 +318,6 @@ class AicusNavigator {
         background: var(--settings-bg-dark);
       }
 
-      /* 커피 후원 섹션 */
-      .coffee-section {
-        margin-top: 16px;
-        padding-top: 12px;
-        border-top: 1px solid var(--border-color);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border-radius: 6px;
-        padding: 8px;
-      }
-
-      .coffee-section:hover {
-        background: var(--hover-bg);
-      }
-
-      .dark .coffee-section {
-        border-top-color: var(--border-color-dark);
-      }
-
-      .dark .coffee-section:hover {
-        background: var(--hover-bg-dark);
-      }
-
-      .coffee-icon {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-        color: #8B4513;
-      }
-
-      .coffee-text {
-        font-size: 12px;
-        color: #666;
-        opacity: 0;
-        transform: translateX(-10px);
-        transition: all 0.3s ease;
-        white-space: nowrap;
-      }
-
-      .dark .coffee-text {
-        color: #a0a0a0;
-      }
-
-      .coffee-section:hover .coffee-text {
-        opacity: 1;
-        transform: translateX(0);
-      }
-
-      /* 후원 모달 */
-      .donation-modal {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.6);
-        display: none;
-        justify-content: center;
-        align-items: center;
-        z-index: 999999;
-        backdrop-filter: blur(4px);
-      }
-
-      .donation-modal.show {
-        display: flex;
-      }
-
-      .modal-content {
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        max-width: 320px;
-        width: 90%;
-        text-align: center;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        transform: scale(0.9);
-        transition: transform 0.2s ease;
-      }
-
-      .donation-modal.show .modal-content {
-        transform: scale(1);
-      }
-
-      .dark .modal-content {
-        background: #2d2d2d;
-        color: white;
-      }
-
-      .modal-header {
-        font-size: 18px;
-        font-weight: 600;
-        margin-bottom: 8px;
-        color: #333;
-      }
-
-      .dark .modal-header {
-        color: #e2e8f0;
-      }
-
-      .modal-subtitle {
-        font-size: 14px;
-        color: #666;
-        margin-bottom: 20px;
-      }
-
-      .dark .modal-subtitle {
-        color: #a0a0a0;
-      }
-
-      .qr-code {
-        width: 160px;
-        height: 160px;
-        margin: 0 auto 20px auto;
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-      }
-
-      .qr-code img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .modal-buttons {
-        display: flex;
-        gap: 12px;
-        margin-top: 20px;
-      }
-
-      .modal-btn {
-        flex: 1;
-        padding: 10px 16px;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-      }
-
-      .modal-btn.primary {
-        background: var(--accent-color, #BCBAE6);
-        color: white;
-      }
-
-      .modal-btn.primary:hover {
-        opacity: 0.9;
-        transform: translateY(-1px);
-      }
-
-      .modal-btn.secondary {
-        background: #f0f0f0;
-        color: #333;
-      }
-
-      .dark .modal-btn.secondary {
-        background: #404040;
-        color: #e2e8f0;
-      }
-
-      .modal-btn.secondary:hover {
-        background: #e0e0e0;
-      }
-
-      .dark .modal-btn.secondary:hover {
-        background: #505050;
-      }
-
-      .modal-close {
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        width: 24px;
-        height: 24px;
-        border: none;
-        background: none;
-        cursor: pointer;
-        font-size: 18px;
-        color: #999;
-      }
-
       .navigator.show-settings .settings-panel {
         display: block;
       }
@@ -554,6 +370,55 @@ class AicusNavigator {
         font-size: 12px;
         font-weight: bold;
         text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+
+      /* 커피 후원 섹션 */
+      .coffee-section {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border-radius: 6px;
+        padding: 8px;
+      }
+
+      .coffee-section:hover {
+        background: var(--hover-bg);
+      }
+
+      .dark .coffee-section {
+        border-top-color: var(--border-color-dark);
+      }
+
+      .dark .coffee-section:hover {
+        background: var(--hover-bg-dark);
+      }
+
+      .coffee-emoji {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+
+      .coffee-text {
+        font-size: 12px;
+        color: #666;
+        opacity: 0;
+        transform: translateX(-10px);
+        transition: all 0.3s ease;
+        white-space: nowrap;
+      }
+
+      .dark .coffee-text {
+        color: #a0a0a0;
+      }
+
+      .coffee-section:hover .coffee-text {
+        opacity: 1;
+        transform: translateX(0);
       }
 
       /* 호버 미리보기 툴팁 */
@@ -646,9 +511,7 @@ class AicusNavigator {
         <div class="settings-title">테마 색상</div>
         <div class="color-palette"></div>
         <div class="coffee-section">
-          <svg class="coffee-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M2,21V19H20V21H2M20,8V5H18V8H20M20,3A2,2 0 0,1 22,5V8A2,2 0 0,1 20,10H18V13A4,4 0 0,1 14,17H8A4,4 0 0,1 4,13V3H20M16,5H6V13A2,2 0 0,0 8,15H14A2,2 0 0,0 16,13V5Z" />
-          </svg>
+          <span class="coffee-emoji">☕</span>
           <span class="coffee-text">개발자에게 커피 한잔 사주기!</span>
         </div>
       </div>
@@ -661,7 +524,6 @@ class AicusNavigator {
     this.shadowRoot.appendChild(navigator);
     this.updateColorPalette();
     this.applyColorScheme();
-    this.createDonationModal();
     
     // 초기 컨텐츠 높이 설정
     setTimeout(() => this.updateContentHeight(), 0);
@@ -765,11 +627,16 @@ class AicusNavigator {
       const deltaY = e.clientY - startY;
       
       const newWidth = Math.max(250, Math.min(500, startWidth + deltaX));
-      const newHeight = Math.max(200, Math.min(window.innerHeight * 0.9, startHeight + deltaY));
+      const newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
       
       navigator.style.width = newWidth + 'px';
       navigator.style.maxHeight = newHeight + 'px';
-      // height는 설정하지 않음 - 컨텐츠에 맞게 자동 조절되도록
+      
+      // 컨텐츠 영역의 최대 높이도 조정
+      const content = this.shadowRoot.querySelector('.content');
+      const headerHeight = this.shadowRoot.querySelector('.header').offsetHeight;
+      const settingsHeight = this.showSettings ? this.shadowRoot.querySelector('.settings-panel').offsetHeight : 0;
+      content.style.maxHeight = (newHeight - headerHeight - settingsHeight - 20) + 'px';
       
       // 컨텐츠 영역 높이 동적 조정
       this.updateContentHeight();
@@ -1074,7 +941,6 @@ class AicusNavigator {
       this.savedStyles = {
         width: navigator.style.width,
         maxHeight: navigator.style.maxHeight
-        // height는 저장하지 않음
       };
       
       // 최소화: 네비게이터와 컨테이너 모두 60px로 강제 변경
@@ -1105,7 +971,6 @@ class AicusNavigator {
       
       if (this.savedStyles) {
         navigator.style.width = this.savedStyles.width || '320px';
-        // height는 복원하지 않음 - 자동으로 컨텐츠에 맞게 조절
         navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
         
         // 복원 후 컨텐츠 높이 재조정
@@ -1200,7 +1065,7 @@ class AicusNavigator {
     
     const accentRgb = this.hexToRgb(this.settings.accentColor);
     
-    // 사용자 지정 투명도 적용
+    // 사용자 지정 투명도 적용 (헤더 0.10, bordercolor 0.3, settingsbg 0.08, hoverBg 0.25)
     const headerBg = this.blendWithWhite(accentRgb, 0.10);      
     const borderColor = this.blendWithWhite(accentRgb, 0.3);     
     const settingsBg = this.blendWithWhite(accentRgb, 0.08);    
@@ -1262,21 +1127,6 @@ class AicusNavigator {
       g: parseInt(result[2], 16),
       b: parseInt(result[3], 16)
     } : { r: 188, g: 186, b: 230 }; // 라벤더 기본값
-  }
-
-  show() {
-    if (this.container) {
-      this.container.style.display = 'block';
-      this.isVisible = true;
-    }
-  }
-
-  hide() {
-    if (this.container) {
-      this.container.style.display = 'none';
-      this.isVisible = false;
-      this.hidePreview();
-    }
   }
 
   createDonationModal() {
@@ -1354,8 +1204,13 @@ class AicusNavigator {
           color: #666;
           font-size: 12px;
         ">
-          QR 코드 영역<br>(daram-qr 파일 필요)
+          <img src="${chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png'}" 
+               alt="토스 후원 QR코드" 
+               style="width: 100%; height: 100%; object-fit: cover;"
+               onerror="this.style.display='none'; this.parentElement.innerHTML='QR 코드를 불러올 수 없습니다';">
         </div>
+        
+        <div id="bmc-wid" style="margin: 20px 0; display: flex; justify-content: center;"></div>
         
         <div style="display: flex; gap: 12px; margin-top: 20px;">
           <button id="feedback-btn" style="
@@ -1394,8 +1249,11 @@ class AicusNavigator {
       }
     });
     
-    // 모달을 DOM에 추가한 후 이벤트 리스너 설정
+    // 버튼을 DOM에 추가한 후 Buy Me a Coffee 스크립트 로드
     document.body.appendChild(modal);
+    
+    // Buy Me a Coffee 스크립트 동적 로드
+    this.loadBuyMeCoffeeScript();
     
     // 버튼 이벤트 리스너
     const closeModalBtn = modal.querySelector('#close-modal-btn');
@@ -1417,9 +1275,31 @@ class AicusNavigator {
     this.donationModal = modal;
   }
 
-  showDonationModal() {
-    console.log('showDonationModal called'); // 디버깅용
+  loadBuyMeCoffeeScript() {
+    // 기존 Buy Me a Coffee 스크립트 제거
+    const existingScript = document.querySelector('script[data-name="bmc-button"]');
+    if (existingScript) {
+      existingScript.remove();
+    }
     
+    // 새로운 스크립트 추가
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src = 'https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js';
+    script.setAttribute('data-name', 'bmc-button');
+    script.setAttribute('data-slug', 'pikiforyou');
+    script.setAttribute('data-color', '#BD5FFF');
+    script.setAttribute('data-emoji', '☕');
+    script.setAttribute('data-font', 'Comic');
+    script.setAttribute('data-text', 'Buy me a coffee');
+    script.setAttribute('data-outline-color', '#000000');
+    script.setAttribute('data-font-color', '#ffffff');
+    script.setAttribute('data-coffee-color', '#FFDD00');
+    
+    document.head.appendChild(script);
+  }
+
+  showDonationModal() {
     if (!this.donationModal) {
       this.createDonationModal();
     }
@@ -1434,8 +1314,6 @@ class AicusNavigator {
   }
 
   hideDonationModal() {
-    console.log('hideDonationModal called'); // 디버깅용
-    
     if (this.donationModal) {
       const content = this.donationModal.querySelector('#modal-content');
       if (content) {
@@ -1455,6 +1333,21 @@ class AicusNavigator {
     
     window.open(mailtoLink);
     this.hideDonationModal();
+  }
+
+  show() {
+    if (this.container) {
+      this.container.style.display = 'block';
+      this.isVisible = true;
+    }
+  }
+
+  hide() {
+    if (this.container) {
+      this.container.style.display = 'none';
+      this.isVisible = false;
+      this.hidePreview();
+    }
   }
 
   escapeHtml(text) {
