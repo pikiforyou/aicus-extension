@@ -969,13 +969,13 @@ class AicusNavigator {
     
     // 사용자 지정 투명도
     const headerBg = this.blendWithWhite(accentRgb, 0.10);      
-    const borderColor = this.blendWithWhite(accentRgb, 0.3);     
+    const borderColor = this.blendWithWhite(accentRgb, 0.15);     
     const settingsBg = this.blendWithWhite(accentRgb, 0.08);    
     const hoverBg = this.blendWithWhite(accentRgb, 0.25);       
     
     // 다크모드용
     const headerBgDark = this.blendWithBlack(accentRgb, 0.2);   
-    const borderColorDark = this.blendWithBlack(accentRgb, 0.5); 
+    const borderColorDark = this.blendWithBlack(accentRgb, 0.3); 
     const settingsBgDark = this.blendWithBlack(accentRgb, 0.15); 
     const hoverBgDark = this.blendWithBlack(accentRgb, 0.3);    
     
