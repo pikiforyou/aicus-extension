@@ -32,7 +32,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["docs/daram-qr.png"],
+      "resources": ["docs/daram-qr.png", "docs/coffee-qr.png"],
       "matches": ["<all_urls>"]
     }
   ]
