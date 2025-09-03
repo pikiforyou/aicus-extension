@@ -1,24 +1,344 @@
-// aicus - 채팅 네비게이터 (완전 새 버전)
-class AicusNavigator {
+// Aicus - Chat Navigator (개선된 모듈형 구조)
+
+// ===== 1. 사이트별 어댑터 시스템 =====
+class ChatSiteAdapter {
   constructor() {
+    this.hostname = window.location.hostname;
+    this.adapter = this.createAdapter();
+  }
+
+  createAdapter() {
+    if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
+      return new ChatGPTAdapter();
+    } else if (this.hostname.includes('claude.ai')) {
+      return new ClaudeAdapter();
+    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
+      return new GeminiAdapter();
+    }
+    return new DefaultAdapter();
+  }
+
+  getUserMessages() {
+    return this.adapter.getUserMessages();
+  }
+
+  extractText(element) {
+    return this.adapter.extractText(element);
+  }
+
+  getObserverConfig() {
+    return this.adapter.getObserverConfig();
+  }
+
+  shouldObserveNode(node) {
+    return this.adapter.shouldObserveNode(node);
+  }
+}
+
+// 기본 어댑터
+class DefaultAdapter {
+  getUserMessages() {
+    return [];
+  }
+
+  extractText(element) {
+    return element.textContent?.trim() || '';
+  }
+
+  getObserverConfig() {
+    return {
+      childList: true,
+      subtree: true,
+      attributes: false
+    };
+  }
+
+  shouldObserveNode(node) {
+    return node.nodeType === Node.ELEMENT_NODE;
+  }
+}
+
+// ChatGPT 어댑터
+class ChatGPTAdapter extends DefaultAdapter {
+  getUserMessages() {
+    return Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
+  }
+
+  shouldObserveNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    
+    // ChatGPT 특정 컨테이너만 감시
+    return node.matches('[data-message-author-role="user"]') ||
+           node.querySelector('[data-message-author-role="user"]') ||
+           node.closest('[data-testid="conversation-turn"]') ||
+           node.matches('.text-base, .markdown, .prose');
+  }
+}
+
+// Claude 어댑터
+class ClaudeAdapter extends DefaultAdapter {
+  getUserMessages() {
+    return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
+  }
+
+  extractText(element) {
+    const pElement = element.querySelector('p.whitespace-pre-wrap');
+    return pElement ? pElement.textContent?.trim() || '' : element.textContent?.trim() || '';
+  }
+
+  shouldObserveNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    
+    // Claude 특정 컨테이너만 감시
+    return node.matches('[data-testid="user-message"]') ||
+           node.querySelector('[data-testid="user-message"]') ||
+           node.closest('[data-testid="conversation"]') ||
+           node.matches('.whitespace-pre-wrap, .prose');
+  }
+}
+
+// Gemini 어댑터
+class GeminiAdapter extends DefaultAdapter {
+  getUserMessages() {
+    const root = document.querySelector('main[role="main"]') || 
+                 document.querySelector('[aria-label="Chat history"]') || 
+                 document.body;
+    
+    const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
+    
+    return bubbles.map(bubble =>
+      bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
+    ).filter((el, index, arr) => arr.indexOf(el) === index);
+  }
+
+  shouldObserveNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    
+    // Gemini 특정 컨테이너만 감시
+    return node.matches('.user-query-bubble-with-background') ||
+           node.querySelector('.user-query-bubble-with-background') ||
+           node.matches('.query-text, .query-text-line') ||
+           node.closest('main[role="main"]');
+  }
+}
+
+// ===== 2. 효율적인 옵저버 관리자 =====
+class SmartObserver {
+  constructor(callback, adapter) {
+    this.callback = callback;
+    this.adapter = adapter;
+    this.observer = null;
+    this.debounceTimer = null;
+    this.lastScanTime = 0;
+    this.scanCooldown = 1000; // 1초 쿨다운
+    this.isObserving = false;
+  }
+
+  start() {
+    if (this.isObserving) return;
+    
+    this.observer = new MutationObserver((mutations) => {
+      this.handleMutations(mutations);
+    });
+
+    this.observer.observe(document.body, this.adapter.getObserverConfig());
+    this.isObserving = true;
+    console.log('🧭 SmartObserver started');
+  }
+
+  stop() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.isObserving = false;
+    console.log('🧭 SmartObserver stopped');
+  }
+
+  handleMutations(mutations) {
+    // 빠른 필터링: 관련 없는 변경사항 무시
+    const relevantMutations = mutations.filter(mutation => {
+      // 텍스트 노드만 변경된 경우 무시
+      if (mutation.type === 'childList') {
+        const hasRelevantNodes = Array.from(mutation.addedNodes).some(node =>
+          this.adapter.shouldObserveNode(node)
+        );
+        return hasRelevantNodes;
+      }
+      return false;
+    });
+
+    if (relevantMutations.length === 0) {
+      return; // 관련 없는 변경사항, 콜백 호출하지 않음
+    }
+
+    // 쿨다운 체크
+    const now = Date.now();
+    if (now - this.lastScanTime < this.scanCooldown) {
+      // 쿨다운 중이면 디바운싱으로 지연
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+      }
+      
+      this.debounceTimer = setTimeout(() => {
+        this.executeScan();
+      }, this.scanCooldown - (now - this.lastScanTime));
+      
+      return;
+    }
+
+    this.executeScan();
+  }
+
+  executeScan() {
+    this.lastScanTime = Date.now();
+    this.callback();
+    console.log('🧭 Observer triggered scan');
+  }
+
+  // 수동 스캔 (페이지 로드 시 등)
+  forceScan() {
+    this.lastScanTime = Date.now();
+    this.callback();
+  }
+}
+
+// ===== 3. 질문 데이터 관리자 =====
+class QuestionManager {
+  constructor(adapter) {
+    this.adapter = adapter;
+    this.questions = [];
+    this.questionMap = new Map(); // 중복 체크용
+  }
+
+  scanQuestions() {
+    const userMessages = this.adapter.getUserMessages();
+    
+    // 위→아래 순서로 정렬
+    userMessages.sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      
+      if (Math.abs(rectA.top - rectB.top) > 10) {
+        return rectA.top - rectB.top;
+      }
+      
+      const position = a.compareDocumentPosition(b);
+      return (position & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+    });
+
+    const newQuestions = [];
+    const newQuestionMap = new Map();
+
+    userMessages.forEach((element, index) => {
+      const text = this.adapter.extractText(element);
+      
+      if (this.isValidQuestion(text)) {
+        const questionId = this.generateQuestionId(text, element);
+        
+        // 중복 체크
+        if (!newQuestionMap.has(questionId)) {
+          const question = {
+            id: questionId,
+            text: text,
+            fullText: text,
+            element: element,
+            index: index + 1
+          };
+          
+          newQuestions.push(question);
+          newQuestionMap.set(questionId, question);
+        }
+      }
+    });
+
+    // 변경사항 체크 (성능 최적화)
+    const hasChanges = this.hasQuestionsChanged(newQuestions);
+    
+    if (hasChanges) {
+      this.questions = newQuestions;
+      this.questionMap = newQuestionMap;
+      console.log(`🧭 Questions updated: ${this.questions.length} questions found`);
+      return true;
+    }
+    
+    return false;
+  }
+
+  isValidQuestion(text) {
+    return text && text.length > 3 && text.length < 10000;
+  }
+
+  generateQuestionId(text, element) {
+    // 텍스트와 DOM 위치 기반으로 고유 ID 생성
+    const textHash = this.simpleHash(text.substring(0, 100));
+    const elementPath = this.getElementPath(element);
+    return `${textHash}-${elementPath}`;
+  }
+
+  simpleHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // 32bit integer
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  getElementPath(element) {
+    const path = [];
+    let current = element;
+    
+    while (current && current !== document.body && path.length < 5) {
+      const tagName = current.tagName?.toLowerCase() || '';
+      const classList = Array.from(current.classList || []).slice(0, 2);
+      path.unshift(`${tagName}${classList.length ? '.' + classList.join('.') : ''}`);
+      current = current.parentElement;
+    }
+    
+    return path.join('>');
+  }
+
+  hasQuestionsChanged(newQuestions) {
+    if (this.questions.length !== newQuestions.length) {
+      return true;
+    }
+    
+    return newQuestions.some((newQ, index) => {
+      const oldQ = this.questions[index];
+      return !oldQ || oldQ.id !== newQ.id;
+    });
+  }
+
+  getQuestions() {
+    return this.questions;
+  }
+
+  findQuestionByIndex(index) {
+    return this.questions.find(q => q.index === index);
+  }
+}
+
+// ===== 4. UI 컴포넌트 관리자 =====
+class UIManager {
+  constructor() {
+    this.container = null;
+    this.shadowRoot = null;
     this.isVisible = false;
     this.isMinimized = false;
     this.isCollapsed = false;
     this.showSettings = false;
-    this.shadowRoot = null;
-    this.container = null;
-    this.observer = null;
-    this.questions = [];
     this.previewTooltip = null;
-    this.donationModal = null;
     
-    // 설정값
     this.settings = {
       accentColor: '#BCBAE6',
       theme: 'auto'
     };
-    
-    // 색상 팔레트
+
     this.colorPalette = [
       { name: 'Lavender', color: '#BCBAE6' },
       { name: 'Blue', color: '#3b82f6' },
@@ -39,22 +359,16 @@ class AicusNavigator {
       { name: 'Italian Plum', color: '#5D4E75' },
       { name: 'Living Coral', color: '#FF6F61' }
     ];
-    
-    this.init();
   }
 
   init() {
     this.createShadowDOM();
-    this.setupMutationObserver();
-    this.scanForQuestions();
+    this.setupEventListeners();
     this.show();
-    
-    // 다크모드 변경 감지
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    mediaQuery.addEventListener('change', () => this.updateTheme());
   }
 
   createShadowDOM() {
+    // Shadow DOM 컨테이너 생성
     this.container = document.createElement('div');
     this.container.id = 'aicus-navigator';
     this.container.style.cssText = `
@@ -66,38 +380,36 @@ class AicusNavigator {
     `;
 
     this.shadowRoot = this.container.attachShadow({ mode: 'closed' });
-    
+    this.createStyles();
+    this.createNavigatorHTML();
+    document.body.appendChild(this.container);
+  }
+
+  createStyles() {
     const style = document.createElement('style');
     style.textContent = `
       :host {
         all: initial;
-        color-scheme: light;
-      }
-      
-      * {
-        box-sizing: border-box;
       }
       
       .navigator {
         width: 320px;
         max-height: 80vh;
-        background: #ffffff;
-        border: 1px solid #e5e5e5;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(0, 0, 0, 0.1);
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-        font-family: inherit;
-        font-size: 14px;
-        line-height: 1.5;
-        color: #333333;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         transition: all 0.3s ease;
         overflow: hidden;
-        isolation: isolate;
+        transform-origin: top right;
       }
 
       .navigator.dark {
-        background: #1f1f1f;
-        border-color: #404040;
-        color: #ffffff;
+        background: rgba(30, 30, 30, 0.95);
+        border-color: rgba(255, 255, 255, 0.1);
+        color: #fff;
       }
 
       .navigator.minimized {
@@ -111,15 +423,15 @@ class AicusNavigator {
         display: flex;
         align-items: center;
         padding: 12px 16px;
-        background: var(--header-bg);
-        border-bottom: 1px solid var(--border-color);
+        background: var(--header-bg, rgba(0, 0, 0, 0.05));
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
         cursor: move;
         user-select: none;
       }
 
       .dark .header {
-        background: var(--header-bg-dark);
-        border-bottom-color: var(--border-color-dark);
+        background: var(--header-bg, rgba(255, 255, 255, 0.05));
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
       }
 
       .title {
@@ -172,21 +484,13 @@ class AicusNavigator {
       }
 
       .content {
-        max-height: 300px;
-        overflow-y: hidden;
+        max-height: calc(80vh - 120px);
+        overflow-y: auto;
         padding: 8px 0;
       }
 
-      .content.scrollable {
-        overflow-y: auto;
-      }
-
       .navigator.show-settings .content {
-        max-height: 250px;
-      }
-
-      .navigator.collapsed .content {
-        display: none;
+        max-height: calc(80vh - 200px);
       }
 
       .content::-webkit-scrollbar {
@@ -208,29 +512,30 @@ class AicusNavigator {
 
       .question-item {
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border-color);
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
         cursor: pointer;
         transition: all 0.2s ease;
-        background: transparent;
       }
 
       .dark .question-item {
-        border-bottom-color: var(--border-color-dark);
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.05));
       }
 
       .question-item:hover {
-        background: var(--hover-bg);
+        background: var(--hover-bg, rgba(0, 0, 0, 0.05)) !important;
         transform: translateX(2px);
       }
 
       .dark .question-item:hover {
-        background: var(--hover-bg-dark);
+        background: var(--hover-bg, rgba(255, 255, 255, 0.05)) !important;
       }
 
       .question-text {
         font-size: 13px;
         line-height: 1.4;
         color: #333;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -253,12 +558,12 @@ class AicusNavigator {
         height: 100%;
         align-items: center;
         justify-content: center;
+        font-size: 24px;
         cursor: pointer;
       }
 
       .navigator.minimized .header,
       .navigator.minimized .content,
-      .navigator.minimized .resize-handle,
       .navigator.minimized .settings-panel {
         display: none;
       }
@@ -267,17 +572,20 @@ class AicusNavigator {
         display: flex;
       }
 
+      .navigator.collapsed .content {
+        display: none;
+      }
+
       .settings-panel {
         display: none;
         padding: 16px;
-        padding-bottom: 6px;
-        border-bottom: 1px solid var(--border-color);
-        background: var(--settings-bg);
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        background: var(--settings-bg, rgba(0, 0, 0, 0.02));
       }
 
       .dark .settings-panel {
-        border-bottom-color: var(--border-color-dark);
-        background: var(--settings-bg-dark);
+        border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.1));
+        background: var(--settings-bg, rgba(255, 255, 255, 0.02));
       }
 
       .navigator.show-settings .settings-panel {
@@ -299,7 +607,6 @@ class AicusNavigator {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
         gap: 6px;
-        margin-bottom: 12px;
       }
 
       .color-option {
@@ -314,11 +621,12 @@ class AicusNavigator {
 
       .color-option:hover {
         transform: scale(1.1);
+        border-color: rgba(255, 255, 255, 0.5);
       }
 
       .color-option.selected {
         border-color: #fff;
-        box-shadow: 0 0 0 2px var(--accent-color);
+        box-shadow: 0 0 0 2px var(--accent-color, #BCBAE6);
       }
 
       .color-option.selected::after {
@@ -331,68 +639,6 @@ class AicusNavigator {
         font-size: 12px;
         font-weight: bold;
         text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-      }
-
-      .coffee-section {
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid var(--border-color);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border-radius: 4px;
-        padding: 6px 8px;
-      }
-
-      .coffee-section:hover {
-        background: var(--hover-bg);
-      }
-
-      .dark .coffee-section {
-        border-top-color: var(--border-color-dark);
-      }
-
-      .dark .coffee-section:hover {
-        background: var(--hover-bg-dark);
-      }
-
-      .coffee-emoji {
-        font-size: 14px;
-        flex-shrink: 0;
-      }
-
-      .coffee-text {
-        font-size: 10px;
-        color: #666;
-        opacity: 0;
-        transform: translateX(-10px);
-        transition: all 0.3s ease;
-        white-space: nowrap;
-      }
-
-      .dark .coffee-text {
-        color: #a0a0a0;
-      }
-
-      .coffee-section:hover .coffee-text {
-        opacity: 1;
-        transform: translateX(0);
-      }
-
-      .resize-handle {
-        position: absolute;
-        bottom: 0;
-        right: 0;
-        width: 16px;
-        height: 16px;
-        cursor: nw-resize;
-        background: linear-gradient(-45deg, transparent 30%, rgba(0,0,0,0.1) 30%, rgba(0,0,0,0.1) 70%, transparent 70%);
-      }
-
-      .dark .resize-handle {
-        background: linear-gradient(-45deg, transparent 30%, rgba(255,255,255,0.1) 30%, rgba(255,255,255,0.1) 70%, transparent 70%);
       }
 
       .preview-tooltip {
@@ -423,14 +669,17 @@ class AicusNavigator {
         background: rgba(255, 255, 255, 0.95);
         color: #333;
       }
+
+      @media (prefers-color-scheme: dark) {
+        .navigator {
+          background: rgba(30, 30, 30, 0.95);
+          border-color: rgba(255, 255, 255, 0.1);
+          color: #fff;
+        }
+      }
     `;
 
     this.shadowRoot.appendChild(style);
-    document.body.appendChild(this.container);
-
-    this.createNavigatorHTML();
-    this.setupEventListeners();
-    this.createPreviewTooltip();
   }
 
   createNavigatorHTML() {
@@ -447,6 +696,8 @@ class AicusNavigator {
           <path fill="var(--accent-color, #BCBAE6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
+          <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
+          <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
         </svg>
       </div>
       <div class="header">
@@ -455,14 +706,12 @@ class AicusNavigator {
           <path fill="var(--accent-color, #BCBAE6)" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
           <path fill="currentColor" d="M36 20 44 34 28 44z"/>
           <circle cx="32" cy="32" r="3" fill="currentColor"/>
+          <circle cx="18.5" cy="24.5" r="2" fill="currentColor"/>
+          <circle cx="45.5" cy="39.5" r="2" fill="currentColor"/>
         </svg>
         <span class="title">Aicus</span>
         <div class="controls">
-          <button class="control-btn settings-btn" title="설정">
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M10 2.5a1.5 1.5 0 011.5 1.5v.5c.494.227.965.497 1.405.806l.353-.353a1.5 1.5 0 112.122 2.122l-.353.353c.309.44.579.911.806 1.405h.5a1.5 1.5 0 010 3h-.5a7.5 7.5 0 01-.806 1.405l.353.353a1.5 1.5 0 11-2.122 2.122l-.353-.353A7.5 7.5 0 0111.5 15.5v.5a1.5 1.5 0 01-3 0v-.5a7.5 7.5 0 01-1.405-.806l-.353.353a1.5 1.5 0 11-2.122-2.122l.353-.353A7.5 7.5 0 014.167 11.5h-.5a1.5 1.5 0 010-3h.5c.227-.494.497-.965.806-1.405L4.62 6.742a1.5 1.5 0 112.122-2.122l.353.353c.44-.309.911-.579 1.405-.806V4a1.5 1.5 0 011.5-1.5zM10 7a3 3 0 100 6 3 3 0 000-6z"/>
-            </svg>
-          </button>
+          <button class="control-btn settings-btn" title="설정">⚙️</button>
           <button class="control-btn collapse-btn" title="접기/펼치기">−</button>
           <button class="control-btn close-btn" title="닫기">×</button>
         </div>
@@ -470,22 +719,16 @@ class AicusNavigator {
       <div class="settings-panel">
         <div class="settings-title">테마 색상</div>
         <div class="color-palette"></div>
-        <div class="coffee-section">
-          <span class="coffee-emoji">☕</span>
-          <span class="coffee-text">개발자에게 커피 한잔 사주기!</span>
-        </div>
       </div>
       <div class="content">
         <div class="empty-state">질문을 찾는 중...</div>
       </div>
-      <div class="resize-handle"></div>
     `;
 
     this.shadowRoot.appendChild(navigator);
     this.updateColorPalette();
     this.applyColorScheme();
-    
-    setTimeout(() => this.updateContentHeight(), 0);
+    this.createPreviewTooltip();
   }
 
   createPreviewTooltip() {
@@ -499,30 +742,36 @@ class AicusNavigator {
     const header = this.shadowRoot.querySelector('.header');
     const minimizedIcon = this.shadowRoot.querySelector('.minimized-icon');
     const mainIcon = this.shadowRoot.querySelector('.main-icon');
-    const title = this.shadowRoot.querySelector('.title');
+    const titleElement = this.shadowRoot.querySelector('.title');
     const settingsBtn = this.shadowRoot.querySelector('.settings-btn');
     const collapseBtn = this.shadowRoot.querySelector('.collapse-btn');
     const closeBtn = this.shadowRoot.querySelector('.close-btn');
-    const resizeHandle = this.shadowRoot.querySelector('.resize-handle');
-    const coffeeSection = this.shadowRoot.querySelector('.coffee-section');
 
-    // 커피 섹션 클릭
-    if (coffeeSection) {
-      coffeeSection.addEventListener('click', () => this.showDonationModal());
-    }
+    // 드래그 기능
+    this.setupDragFunctionality(header, minimizedIcon);
 
-    // 드래그 변수
+    // 컨트롤 버튼 이벤트
+    mainIcon.addEventListener('click', () => this.toggleMinimize());
+    titleElement.addEventListener('click', () => this.toggleMinimize());
+    minimizedIcon.addEventListener('click', () => this.toggleMinimize());
+    
+    settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSettings();
+    });
+    
+    collapseBtn.addEventListener('click', () => this.toggleCollapse());
+    closeBtn.addEventListener('click', () => this.hide());
+  }
+
+  setupDragFunctionality(header, minimizedIcon) {
     let isDragging = false;
-    let dragMoved = false;
     let startX, startY, startLeft, startTop;
 
-    // 드래그 시작
     const startDrag = (e) => {
-      if (e.target.closest('.controls') || e.target.closest('.resize-handle') || 
-          e.target.closest('.main-icon') || e.target.closest('.title')) return;
+      if (e.target.closest('.controls') || e.target.closest('.main-icon') || e.target.closest('.title')) return;
       
       isDragging = true;
-      dragMoved = false;
       startX = e.clientX;
       startY = e.clientY;
       const rect = this.container.getBoundingClientRect();
@@ -534,16 +783,11 @@ class AicusNavigator {
       e.preventDefault();
     };
 
-    // 드래그 중
     const drag = (e) => {
       if (!isDragging) return;
       
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
-      
-      if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
-        dragMoved = true;
-      }
       
       const containerWidth = this.isMinimized ? 60 : 320;
       const newLeft = Math.max(0, Math.min(window.innerWidth - containerWidth, startLeft + deltaX));
@@ -554,7 +798,6 @@ class AicusNavigator {
       this.container.style.right = 'auto';
     };
 
-    // 드래그 종료
     const stopDrag = () => {
       isDragging = false;
       document.removeEventListener('mousemove', drag);
@@ -562,189 +805,22 @@ class AicusNavigator {
     };
 
     header.addEventListener('mousedown', startDrag);
-
-    // 리사이즈 기능
-    let isResizing = false;
-    let startWidth, startHeight;
-
-    const startResize = (e) => {
-      isResizing = true;
-      startWidth = navigator.offsetWidth;
-      startHeight = navigator.offsetHeight;
-      startX = e.clientX;
-      startY = e.clientY;
-      
-      document.addEventListener('mousemove', resize);
-      document.addEventListener('mouseup', stopResize);
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    const resize = (e) => {
-      if (!isResizing) return;
-      
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-      
-      const newWidth = Math.max(250, Math.min(500, startWidth + deltaX));
-      const newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
-      
-      navigator.style.width = newWidth + 'px';
-      navigator.style.maxHeight = newHeight + 'px';
-      
-      this.updateContentHeight();
-    };
-
-    const stopResize = () => {
-      isResizing = false;
-      document.removeEventListener('mousemove', resize);
-      document.removeEventListener('mouseup', stopResize);
-    };
-
-    resizeHandle.addEventListener('mousedown', startResize);
-
-    // 아이콘/타이틀 클릭 - 최소화/복원
-    mainIcon.addEventListener('click', (e) => {
-      this.toggleMinimize();
-      e.preventDefault();
-      e.stopPropagation();
-    });
-
-    title.addEventListener('click', (e) => {
-      this.toggleMinimize();
-      e.preventDefault();
-      e.stopPropagation();
-    });
-
-    // 최소화 아이콘 클릭
-    minimizedIcon.addEventListener('click', (e) => {
-      if (!dragMoved) {
-        this.toggleMinimize();
-      }
-      e.preventDefault();
-    });
-
-    // 최소화 아이콘 드래그
-    minimizedIcon.addEventListener('mousedown', (e) => {
-      isDragging = true;
-      dragMoved = false;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = this.container.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      
-      document.addEventListener('mousemove', drag);
-      document.addEventListener('mouseup', stopDrag);
-      e.preventDefault();
-    });
-
-    // 컨트롤 버튼들
-    settingsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleSettings();
-    });
-    
-    collapseBtn.addEventListener('click', () => this.toggleCollapse());
-    closeBtn.addEventListener('click', () => this.hide());
+    minimizedIcon.addEventListener('mousedown', startDrag);
   }
 
-  setupMutationObserver() {
-    this.observer = new MutationObserver((mutations) => {
-      let shouldRescan = false;
-      
-      mutations.forEach((mutation) => {
-        if (mutation.addedNodes.length > 0) {
-          shouldRescan = true;
-        }
-      });
-
-      if (shouldRescan) {
-        clearTimeout(this.rescanTimeout);
-        this.rescanTimeout = setTimeout(() => this.scanForQuestions(), 500);
-      }
-    });
-
-    this.observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  scanForQuestions() {
-    let userMessages = [];
-
-    if (window.location.hostname.includes('openai.com') || window.location.hostname.includes('chatgpt.com')) {
-      userMessages = Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
-    } else if (window.location.hostname.includes('claude.ai')) {
-      userMessages = Array.from(document.querySelectorAll('[data-testid="user-message"]'));
-    } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
-      const root = document.querySelector('main[role="main"]') || document.body;
-      const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
-      userMessages = bubbles.map(bubble =>
-        bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
-      );
-      userMessages = Array.from(new Set(userMessages));
-    }
-
-    // 위→아래 정렬
-    userMessages.sort((a, b) => {
-      const rectA = a.getBoundingClientRect();
-      const rectB = b.getBoundingClientRect();
-      
-      if (Math.abs(rectA.top - rectB.top) > 10) {
-        return rectA.top - rectB.top;
-      }
-      
-      const position = a.compareDocumentPosition(b);
-      return (position & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
-    });
-
-    // 텍스트 추출
-    const questions = [];
-    userMessages.forEach((container, index) => {
-      let text = '';
-      
-      if (window.location.hostname.includes('claude.ai')) {
-        const pElement = container.querySelector('p.whitespace-pre-wrap');
-        text = pElement ? pElement.textContent?.trim() : container.textContent?.trim();
-      } else if (window.location.hostname.includes('openai.com') || window.location.hostname.includes('chatgpt.com')) {
-        text = container.textContent?.trim();
-      } else if (window.location.hostname.includes('gemini.google.com') || window.location.hostname.includes('bard.google.com')) {
-        text = container.textContent?.trim();
-        if (!text) {
-          const textElements = container.querySelectorAll('p, div, span');
-          text = Array.from(textElements)
-            .map(el => el.textContent?.trim())
-            .filter(t => t && t.length > 5)
-            .join(' ');
-        }
-      }
-
-      if (text && text.length > 3 && text.length < 10000) {      
-        questions.push({
-          text: text,
-          fullText: text,
-          element: container,
-          index: index + 1
-        });
-      }
-    });
-
-    this.questions = questions;
-    this.updateQuestionsList();
-  }
-
-  updateQuestionsList() {
+  updateQuestionsList(questions) {
     const content = this.shadowRoot.querySelector('.content');
     
-    if (this.questions.length === 0) {
+    if (questions.length === 0) {
       content.innerHTML = `
         <div class="empty-state">
-          <div>질문을 찾을 수 없습니다.</div>
+          <div style="margin-bottom: 8px;">질문을 찾을 수 없습니다.</div>
         </div>
       `;
       return;
     }
 
-    const questionsHTML = this.questions.map(question => `
+    const questionsHTML = questions.map(question => `
       <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
@@ -752,22 +828,25 @@ class AicusNavigator {
 
     content.innerHTML = questionsHTML;
 
-    // 이벤트 추가
-    content.querySelectorAll('.question-item').forEach(item => {
+    // 이벤트 리스너 추가
+    this.attachQuestionListeners();
+  }
+
+  attachQuestionListeners() {
+    const items = this.shadowRoot.querySelectorAll('.question-item');
+    
+    items.forEach(item => {
+      // 클릭 이벤트
       item.addEventListener('click', () => {
         const index = parseInt(item.dataset.index);
-        const question = this.questions.find(q => q.index === index);
-        if (question && question.element) {
-          this.scrollToQuestion(question.element);
-        }
+        this.onQuestionClick?.(index);
       });
 
+      // 호버 이벤트
       item.addEventListener('mouseenter', (e) => this.showPreview(e, item));
       item.addEventListener('mouseleave', () => this.hidePreview());
       item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
     });
-    
-    this.checkScrollNeed();
   }
 
   showPreview(e, item) {
@@ -804,36 +883,6 @@ class AicusNavigator {
     this.previewTooltip.style.top = top + 'px';
   }
 
-  scrollToQuestion(element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    this.highlightElement(element);
-  }
-
-  highlightElement(element) {
-    document.querySelectorAll('.aicus-highlight').forEach(el => {
-      el.classList.remove('aicus-highlight');
-    });
-
-    element.classList.add('aicus-highlight');
-
-    if (!document.getElementById('aicus-highlight-style')) {
-      const style = document.createElement('style');
-      style.id = 'aicus-highlight-style';
-      style.textContent = `
-        .aicus-highlight {
-          background: rgba(255, 235, 59, 0.3) !important;
-          border-radius: 4px !important;
-          transition: background 0.5s ease !important;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    setTimeout(() => {
-      element.classList.remove('aicus-highlight');
-    }, 3000);
-  }
-
   toggleCollapse() {
     this.isCollapsed = !this.isCollapsed;
     const navigator = this.shadowRoot.querySelector('.navigator');
@@ -842,11 +891,9 @@ class AicusNavigator {
     if (this.isCollapsed) {
       navigator.classList.add('collapsed');
       collapseBtn.textContent = '+';
-      collapseBtn.title = '펼치기';
     } else {
       navigator.classList.remove('collapsed');
       collapseBtn.textContent = '−';
-      collapseBtn.title = '접기';
     }
   }
 
@@ -855,38 +902,16 @@ class AicusNavigator {
     const navigator = this.shadowRoot.querySelector('.navigator');
     
     if (this.isMinimized) {
-      this.savedStyles = {
-        width: navigator.style.width,
-        maxHeight: navigator.style.maxHeight
-      };
-      
       navigator.classList.add('minimized');
       this.container.style.width = '60px';
       this.container.style.height = '60px';
-      
-      const currentRight = parseInt(this.container.style.right) || 20;
-      this.container.style.right = currentRight + 'px';
-      this.container.style.left = 'auto';
-      
       this.showSettings = false;
       navigator.classList.remove('show-settings');
       this.hidePreview();
     } else {
       navigator.classList.remove('minimized');
-      
       this.container.style.width = 'auto';
       this.container.style.height = 'auto';
-      
-      const currentRight = parseInt(this.container.style.right) || 20;
-      this.container.style.right = currentRight + 'px';
-      this.container.style.left = 'auto';
-      
-      if (this.savedStyles) {
-        navigator.style.width = this.savedStyles.width || '320px';
-        navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
-        
-        setTimeout(() => this.updateContentHeight(), 0);
-      }
     }
   }
 
@@ -899,45 +924,6 @@ class AicusNavigator {
     } else {
       navigator.classList.remove('show-settings');
     }
-    
-    setTimeout(() => this.updateContentHeight(), 0);
-  }
-
-  updateContentHeight() {
-    const navigator = this.shadowRoot.querySelector('.navigator');
-    const content = this.shadowRoot.querySelector('.content');
-    const header = this.shadowRoot.querySelector('.header');
-    const settingsPanel = this.shadowRoot.querySelector('.settings-panel');
-    
-    if (!navigator || !content || !header) return;
-    
-    const navigatorMaxHeight = parseInt(navigator.style.maxHeight) || parseInt(getComputedStyle(navigator).maxHeight) || 500;
-    const headerHeight = header.offsetHeight;
-    const settingsHeight = this.showSettings && settingsPanel ? settingsPanel.offsetHeight : 0;
-    const resizeHandleHeight = 16;
-    const padding = 20;
-    
-    const availableHeight = navigatorMaxHeight - headerHeight - settingsHeight - resizeHandleHeight - padding;
-    const finalHeight = Math.max(100, availableHeight);
-    content.style.maxHeight = finalHeight + 'px';
-    
-    this.checkScrollNeed();
-  }
-
-  checkScrollNeed() {
-    const content = this.shadowRoot.querySelector('.content');
-    if (!content) return;
-    
-    setTimeout(() => {
-      const contentHeight = content.scrollHeight;
-      const maxHeight = parseInt(content.style.maxHeight) || 300;
-      
-      if (contentHeight > maxHeight) {
-        content.classList.add('scrollable');
-      } else {
-        content.classList.remove('scrollable');
-      }
-    }, 0);
   }
 
   updateColorPalette() {
@@ -966,55 +952,15 @@ class AicusNavigator {
     navigator.style.setProperty('--accent-color', this.settings.accentColor);
     
     const accentRgb = this.hexToRgb(this.settings.accentColor);
-    
-    // 사용자 지정 투명도
-    const headerBg = this.blendWithWhite(accentRgb, 0.10);      
-    const borderColor = this.blendWithWhite(accentRgb, 0.15);     
-    const settingsBg = this.blendWithWhite(accentRgb, 0.08);    
-    const hoverBg = this.blendWithWhite(accentRgb, 0.25);       
-    
-    // 다크모드용
-    const headerBgDark = this.blendWithBlack(accentRgb, 0.2);   
-    const borderColorDark = this.blendWithBlack(accentRgb, 0.3); 
-    const settingsBgDark = this.blendWithBlack(accentRgb, 0.15); 
-    const hoverBgDark = this.blendWithBlack(accentRgb, 0.3);    
+    const headerBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.08)`;
+    const borderColor = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
+    const settingsBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.05)`;
+    const hoverBg = `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.15)`;
     
     navigator.style.setProperty('--header-bg', headerBg);
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
-    
-    navigator.style.setProperty('--header-bg-dark', headerBgDark);
-    navigator.style.setProperty('--border-color-dark', borderColorDark);
-    navigator.style.setProperty('--settings-bg-dark', settingsBgDark);
-    navigator.style.setProperty('--hover-bg-dark', hoverBgDark);
-    
-    this.updateTheme();
-  }
-
-  updateTheme() {
-    const navigator = this.shadowRoot.querySelector('.navigator');
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    if (isDark) {
-      navigator.classList.add('dark');
-    } else {
-      navigator.classList.remove('dark');
-    }
-  }
-
-  blendWithWhite(rgb, alpha) {
-    const r = Math.round(rgb.r * alpha + 255 * (1 - alpha));
-    const g = Math.round(rgb.g * alpha + 255 * (1 - alpha));
-    const b = Math.round(rgb.b * alpha + 255 * (1 - alpha));
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-
-  blendWithBlack(rgb, alpha) {
-    const r = Math.round(rgb.r * alpha);
-    const g = Math.round(rgb.g * alpha);
-    const b = Math.round(rgb.b * alpha);
-    return `rgb(${r}, ${g}, ${b})`;
   }
 
   hexToRgb(hex) {
@@ -1024,224 +970,6 @@ class AicusNavigator {
       g: parseInt(result[2], 16),
       b: parseInt(result[3], 16)
     } : { r: 188, g: 186, b: 230 };
-  }
-
-  createDonationModal() {
-    // 기존 모달 제거
-    const existingModal = document.getElementById('aicus-donation-modal');
-    if (existingModal) {
-      existingModal.remove();
-    }
-    
-    const modal = document.createElement('div');
-    modal.id = 'aicus-donation-modal';
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0, 0, 0, 0.6);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      z-index: 999999;
-      backdrop-filter: blur(4px);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-    
-    modal.innerHTML = `
-      <div id="modal-content" style="
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        max-width: 320px;
-        width: 90%;
-        text-align: center;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        transform: scale(0.9);
-        transition: transform 0.2s ease;
-        position: relative;
-      ">
-        <button class="close-modal-btn" style="
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          width: 24px;
-          height: 24px;
-          border: none;
-          background: none;
-          cursor: pointer;
-          font-size: 18px;
-          color: #999;
-        ">×</button>
-        
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #333;">
-          프로그램이 유용했다면<br>개발자를 응원해주세요!
-        </div>
-        
-        <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
-          QR코드를 스캔해서 후원할 수 있어요
-        </div>
-        
-        <div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;">
-          <button class="korean-btn" style="
-            padding: 8px 16px;
-            border: 2px solid ${this.settings.accentColor};
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            background: ${this.settings.accentColor};
-            color: white;
-            transition: all 0.2s ease;
-          ">Korean</button>
-          
-          <button class="international-btn" style="
-            padding: 8px 16px;
-            border: 2px solid ${this.settings.accentColor};
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            background: white;
-            color: ${this.settings.accentColor};
-            transition: all 0.2s ease;
-          ">International</button>
-        </div>
-        
-        <div style="
-          width: 160px;
-          height: 160px;
-          margin: 0 auto 20px auto;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-          background: #f0f0f0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #666;
-          font-size: 12px;
-        ">
-          <img class="qr-image" src="${chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png'}" 
-               alt="후원 QR코드" 
-               style="width: 100%; height: 100%; object-fit: cover;"
-               onerror="this.style.display='none'; this.parentElement.innerHTML='QR 코드를 불러올 수 없습니다';">
-        </div>
-        
-        <div style="display: flex; gap: 12px; margin-top: 20px;">
-          <button class="feedback-btn" style="
-            flex: 1;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            background: #f0f0f0;
-            color: #333;
-            transition: all 0.2s ease;
-          ">피드백 보내주기</button>
-          
-          <button class="close-btn" style="
-            flex: 1;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            background: ${this.settings.accentColor};
-            color: white;
-            transition: all 0.2s ease;
-          ">닫기</button>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // 모든 이벤트 리스너 설정
-    const koreanBtn = modal.querySelector('.korean-btn');
-    const internationalBtn = modal.querySelector('.international-btn');
-    const qrImage = modal.querySelector('.qr-image');
-    const closeModalBtn = modal.querySelector('.close-modal-btn');
-    const feedbackBtn = modal.querySelector('.feedback-btn');
-    const closeBtnMain = modal.querySelector('.close-btn');
-    
-    // QR 코드 전환 기능
-    koreanBtn.addEventListener('click', () => {
-      koreanBtn.style.background = this.settings.accentColor;
-      koreanBtn.style.color = 'white';
-      internationalBtn.style.background = 'white';
-      internationalBtn.style.color = this.settings.accentColor;
-      
-      qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png';
-      qrImage.alt = '토스 후원 QR코드';
-    });
-    
-    internationalBtn.addEventListener('click', () => {
-      internationalBtn.style.background = this.settings.accentColor;
-      internationalBtn.style.color = 'white';
-      koreanBtn.style.background = 'white';
-      koreanBtn.style.color = this.settings.accentColor;
-      
-      qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/coffee-qr.png') : 'docs/coffee-qr.png';
-      qrImage.alt = 'Buy Me a Coffee QR코드';
-    });
-    
-    // 닫기 버튼들
-    closeModalBtn.addEventListener('click', () => this.hideDonationModal());
-    closeBtnMain.addEventListener('click', () => this.hideDonationModal());
-    
-    // 피드백 버튼
-    feedbackBtn.addEventListener('click', () => this.sendFeedback());
-    
-    // 모달 외부 클릭시 닫기
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        this.hideDonationModal();
-      }
-    });
-    
-    this.donationModal = modal;
-  }
-
-  showDonationModal() {
-    if (!this.donationModal) {
-      this.createDonationModal();
-    }
-    
-    this.donationModal.style.display = 'flex';
-    setTimeout(() => {
-      const content = this.donationModal.querySelector('#modal-content');
-      if (content) {
-        content.style.transform = 'scale(1)';
-      }
-    }, 10);
-  }
-
-  hideDonationModal() {
-    if (this.donationModal) {
-      const content = this.donationModal.querySelector('#modal-content');
-      if (content) {
-        content.style.transform = 'scale(0.9)';
-      }
-      
-      setTimeout(() => {
-        this.donationModal.style.display = 'none';
-      }, 200);
-    }
-  }
-
-  sendFeedback() {
-    const subject = encodeURIComponent('Aicus 확장 프로그램 피드백');
-    const body = encodeURIComponent('안녕하세요!\n\nAicus 확장 프로그램에 대한 피드백을 보내드립니다.\n\n피드백 내용:\n- \n\n감사합니다!');
-    const mailtoLink = `mailto:pikiforyou@gmail.com?subject=${subject}&body=${body}`;
-    
-    window.open(mailtoLink);
-    this.hideDonationModal();
   }
 
   show() {
@@ -1266,38 +994,153 @@ class AicusNavigator {
   }
 
   destroy() {
-    if (this.observer) {
-      this.observer.disconnect();
-    }
     if (this.container) {
       this.container.remove();
     }
-    if (this.donationModal) {
-      this.donationModal.remove();
-    }
-    if (this.rescanTimeout) {
-      clearTimeout(this.rescanTimeout);
-    }
+  }
+
+  setQuestionClickHandler(handler) {
+    this.onQuestionClick = handler;
   }
 }
 
-// 전역 변수로 초기화
+// ===== 5. 네비게이션 관리자 =====
+class NavigationManager {
+  scrollToQuestion(element) {
+    element.scrollIntoView({ 
+      behavior: 'smooth', 
+      block: 'center',
+      inline: 'nearest'
+    });
+
+    this.highlightElement(element);
+  }
+
+  highlightElement(element) {
+    // 기존 하이라이트 제거
+    document.querySelectorAll('.aicus-highlight').forEach(el => {
+      el.classList.remove('aicus-highlight');
+    });
+
+    element.classList.add('aicus-highlight');
+
+    // 하이라이트 스타일 추가 (한번만)
+    if (!document.getElementById('aicus-highlight-style')) {
+      const style = document.createElement('style');
+      style.id = 'aicus-highlight-style';
+      style.textContent = `
+        .aicus-highlight {
+          background: rgba(255, 235, 59, 0.3) !important;
+          border-radius: 4px !important;
+          transition: background 0.5s ease !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    // 3초 후 하이라이트 제거
+    setTimeout(() => {
+      element.classList.remove('aicus-highlight');
+    }, 3000);
+  }
+}
+
+// ===== 6. 메인 컨트롤러 =====
+class AicusNavigator {
+  constructor() {
+    this.adapter = new ChatSiteAdapter();
+    this.questionManager = new QuestionManager(this.adapter);
+    this.uiManager = new UIManager();
+    this.navigationManager = new NavigationManager();
+    this.observer = null;
+    
+    this.init();
+  }
+
+  init() {
+    console.log(`🧭 Aicus Navigator initializing for ${window.location.hostname}`);
+    
+    // UI 초기화
+    this.uiManager.init();
+    this.uiManager.setQuestionClickHandler((index) => this.handleQuestionClick(index));
+    
+    // 스마트 옵저버 시작
+    this.observer = new SmartObserver(
+      () => this.handleContentChange(),
+      this.adapter
+    );
+    
+    // 초기 스캔
+    this.performInitialScan();
+    
+    // 옵저버 시작
+    this.observer.start();
+    
+    console.log('🧭 Aicus Navigator initialized successfully');
+  }
+
+  performInitialScan() {
+    const hasChanges = this.questionManager.scanQuestions();
+    if (hasChanges) {
+      this.uiManager.updateQuestionsList(this.questionManager.getQuestions());
+    }
+  }
+
+  handleContentChange() {
+    const hasChanges = this.questionManager.scanQuestions();
+    if (hasChanges) {
+      this.uiManager.updateQuestionsList(this.questionManager.getQuestions());
+      console.log(`🧭 UI updated with ${this.questionManager.getQuestions().length} questions`);
+    }
+  }
+
+  handleQuestionClick(index) {
+    const question = this.questionManager.findQuestionByIndex(index);
+    if (question && question.element) {
+      this.navigationManager.scrollToQuestion(question.element);
+    }
+  }
+
+  show() {
+    this.uiManager.show();
+  }
+
+  hide() {
+    this.uiManager.hide();
+  }
+
+  destroy() {
+    if (this.observer) {
+      this.observer.stop();
+    }
+    if (this.uiManager) {
+      this.uiManager.destroy();
+    }
+    console.log('🧭 Aicus Navigator destroyed');
+  }
+}
+
+// ===== 7. 확장 프로그램 초기화 =====
 let aicusNavigator = null;
 
 function initAicus() {
+  // 기존 인스턴스 정리
   if (aicusNavigator) {
     aicusNavigator.destroy();
   }
   
+  // 새 인스턴스 생성
   aicusNavigator = new AicusNavigator();
 }
 
+// DOM 준비 시 초기화
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initAicus);
 } else {
   initAicus();
 }
 
+// 페이지 언로드 시 정리
 window.addEventListener('beforeunload', () => {
   if (aicusNavigator) {
     aicusNavigator.destroy();
