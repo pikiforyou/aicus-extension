@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aicus",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "채팅 기록에서 질문/답변으로 쉽게 이동할 수 있는 플로팅 리스트. GPT, Claude, Gemini 지원. Created by @pikiforyou.",
   "permissions": [
     "activeTab"
@@ -28,7 +28,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "aicus - Chat Navigator"
+    "default_title": "Aicus - Chat Navigator"
   },
   "web_accessible_resources": [
     {
