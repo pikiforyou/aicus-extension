@@ -41,44 +41,63 @@ class ChatSiteAdapter {
     return container.textContent?.trim() || '';
   }
 
-  shouldObserveNode(node) {
+  // 채팅 관련 노드인지 정밀하게 판단
+  isRelevantChatNode(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
     
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
       return node.matches('[data-message-author-role="user"]') ||
              node.querySelector('[data-message-author-role="user"]') ||
-             node.closest('[data-testid="conversation-turn"]') ||
-             node.matches('.text-base, .markdown, .prose');
+             node.matches('[data-testid*="conversation"]') ||
+             node.closest('[data-testid*="conversation"]');
     } else if (this.hostname.includes('claude.ai')) {
       return node.matches('[data-testid="user-message"]') ||
              node.querySelector('[data-testid="user-message"]') ||
-             node.closest('[data-testid="conversation"]') ||
-             node.matches('.whitespace-pre-wrap, .prose');
+             node.matches('[data-testid*="conversation"]') ||
+             node.closest('[data-testid*="conversation"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
       return node.matches('.user-query-bubble-with-background') ||
              node.querySelector('.user-query-bubble-with-background') ||
-             node.matches('.query-text, .query-text-line') ||
+             node.matches('main[role="main"]') ||
              node.closest('main[role="main"]');
     }
-    return true;
+    
+    return false;
+  }
+
+  // 현재 채팅 페이지에 있는지 확인
+  isOnChatPage() {
+    if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
+      return !!document.querySelector('[data-message-author-role]');
+    } else if (this.hostname.includes('claude.ai')) {
+      return !!document.querySelector('[data-testid="user-message"]');
+    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
+      return !!document.querySelector('.user-query-bubble-with-background');
+    }
+    return false;
   }
 }
 
-// ===== 2. 효율적인 옵저버 관리자 =====
-class SmartObserver {
+// ===== 2. 최적화된 MutationObserver =====
+class OptimizedObserver {
   constructor(callback, adapter) {
     this.callback = callback;
     this.adapter = adapter;
     this.observer = null;
     this.debounceTimer = null;
     this.lastScanTime = 0;
-    this.scanCooldown = 1000;
+    this.scanCooldown = 1000; // 1초 쿨다운
     this.isObserving = false;
+    
+    // SPA 감지를 위한 URL 추적
+    this.lastUrl = window.location.href;
+    this.urlCheckTimer = null;
   }
 
   start() {
     if (this.isObserving) return;
     
+    // MutationObserver 시작
     this.observer = new MutationObserver((mutations) => {
       this.handleMutations(mutations);
     });
@@ -86,9 +105,14 @@ class SmartObserver {
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: false
+      attributes: false // attributes 감시 비활성화로 성능 향상
     });
+
+    // URL 변화 감지 설정
+    this.setupUrlWatcher();
+    
     this.isObserving = true;
+    console.log('🧭 OptimizedObserver started');
   }
 
   stop() {
@@ -96,27 +120,107 @@ class SmartObserver {
       this.observer.disconnect();
       this.observer = null;
     }
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
+    
+    this.clearTimers();
+    this.cleanupUrlWatcher();
     this.isObserving = false;
+    
+    console.log('🧭 OptimizedObserver stopped');
+  }
+
+  setupUrlWatcher() {
+    // History API 감지
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    
+    this.originalPushState = originalPushState;
+    this.originalReplaceState = originalReplaceState;
+    
+    history.pushState = (...args) => {
+      originalPushState.apply(history, args);
+      this.onUrlChange();
+    };
+    
+    history.replaceState = (...args) => {
+      originalReplaceState.apply(history, args);
+      this.onUrlChange();
+    };
+    
+    // popstate 이벤트
+    this.popstateHandler = () => this.onUrlChange();
+    window.addEventListener('popstate', this.popstateHandler);
+    
+    // URL 변화 주기적 체크 (fallback - 가벼운 체크)
+    this.urlCheckTimer = setInterval(() => {
+      if (window.location.href !== this.lastUrl) {
+        this.onUrlChange();
+      }
+    }, 2000); // 2초마다 URL만 체크
+  }
+
+  cleanupUrlWatcher() {
+    // History API 복원
+    if (this.originalPushState) {
+      history.pushState = this.originalPushState;
+    }
+    if (this.originalReplaceState) {
+      history.replaceState = this.originalReplaceState;
+    }
+    
+    // 이벤트 리스너 제거
+    if (this.popstateHandler) {
+      window.removeEventListener('popstate', this.popstateHandler);
+    }
+    
+    // 타이머 정리
+    if (this.urlCheckTimer) {
+      clearInterval(this.urlCheckTimer);
+      this.urlCheckTimer = null;
+    }
+  }
+
+  onUrlChange() {
+    const newUrl = window.location.href;
+    if (newUrl !== this.lastUrl) {
+      console.log('🧭 URL changed, scanning in 500ms');
+      this.lastUrl = newUrl;
+      
+      // URL 변경 시 잠시 후 스캔 (DOM 로딩 대기)
+      setTimeout(() => {
+        this.forceScan();
+      }, 500);
+    }
   }
 
   handleMutations(mutations) {
+    // 채팅 관련 변화만 필터링
     const relevantMutations = mutations.filter(mutation => {
       if (mutation.type === 'childList') {
-        const hasRelevantNodes = Array.from(mutation.addedNodes).some(node =>
-          this.adapter.shouldObserveNode(node)
+        const addedNodes = Array.from(mutation.addedNodes);
+        const removedNodes = Array.from(mutation.removedNodes);
+        
+        // 추가되거나 제거된 노드 중 채팅 관련 노드가 있는지 확인
+        return [...addedNodes, ...removedNodes].some(node => 
+          this.adapter.isRelevantChatNode(node)
         );
-        return hasRelevantNodes;
       }
       return false;
     });
 
-    if (relevantMutations.length === 0) return;
+    if (relevantMutations.length === 0) {
+      return; // 채팅 관련 변화가 없으면 무시
+    }
 
+    console.log(`🧭 Detected ${relevantMutations.length} relevant mutations`);
+    this.debouncedScan();
+  }
+
+  debouncedScan() {
     const now = Date.now();
+    
+    // 쿨다운 체크
     if (now - this.lastScanTime < this.scanCooldown) {
+      // 디바운싱: 기존 타이머 취소하고 새로 설정
       if (this.debounceTimer) {
         clearTimeout(this.debounceTimer);
       }
@@ -128,16 +232,30 @@ class SmartObserver {
       return;
     }
 
+    // 즉시 실행
     this.executeScan();
   }
 
   executeScan() {
     this.lastScanTime = Date.now();
     this.callback();
+    console.log('🧭 Scan executed');
+  }
+
+  forceScan() {
+    this.lastScanTime = Date.now();
+    this.callback();
+  }
+
+  clearTimers() {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
   }
 }
 
-// ===== 3. 메인 네비게이터 클래스 (원본 기능 100% 유지) =====
+// ===== 3. 메인 네비게이터 클래스 =====
 class AicusNavigator {
   constructor() {
     this.isVisible = false;
@@ -194,6 +312,117 @@ class AicusNavigator {
     // 다크모드 변경 감지
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     mediaQuery.addEventListener('change', () => this.updateTheme());
+  }
+
+  setupMutationObserver() {
+    // 최적화된 옵저버 사용
+    this.observer = new OptimizedObserver(
+      () => this.scanForQuestions(),
+      this.adapter
+    );
+    this.observer.start();
+  }
+
+  scanForQuestions() {
+    let userMessages = this.adapter.getUserMessages();
+
+    // 위→아래 정렬
+    userMessages.sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      
+      if (Math.abs(rectA.top - rectB.top) > 10) {
+        return rectA.top - rectB.top;
+      }
+      
+      const position = a.compareDocumentPosition(b);
+      return (position & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+    });
+
+    // 텍스트 추출
+    const questions = [];
+    userMessages.forEach((container, index) => {
+      const text = this.adapter.extractText(container);
+
+      // 2글자 이상 허용하되 시스템 텍스트는 제외
+      if (text && this.isValidQuestion(text)) {      
+        questions.push({
+          text: text,
+          fullText: text,
+          element: container,
+          index: index + 1
+        });
+      }
+    });
+
+    this.questions = questions;
+    this.updateQuestionsList();
+    
+    console.log(`🧭 Found ${questions.length} valid questions`);
+  }
+
+  // 질문 유효성 검사 (2글자 이상 허용, 시스템 텍스트 제외)
+  isValidQuestion(text) {
+    if (!text || text.length < 2 || text.length > 10000) {
+      return false;
+    }
+    
+    // 의미있는 텍스트인지 확인 (공백, 특수문자만으로 이루어진 것 제외)
+    const meaningfulText = text.trim().replace(/[\s\n\r\t]/g, '');
+    if (meaningfulText.length < 2) {
+      return false;
+    }
+    
+    // 시스템 텍스트 제외 (Claude의 "계속" 버튼 등)
+    const systemTexts = ['계속', 'continue', '继续', 'continuer', 'continuar', 'fortsetzung'];
+    const lowerText = text.toLowerCase().trim();
+    
+    if (systemTexts.includes(lowerText)) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  updateQuestionsList() {
+    const content = this.shadowRoot.querySelector('.content');
+
+    if (this.questions.length === 0) {
+      // 현재 페이지 상태에 따라 다른 메시지 표시
+      const isOnChat = this.adapter.isOnChatPage();
+      
+      content.innerHTML = `
+        <div class="empty-state">
+          <div>${isOnChat ? '질문을 찾는 중...' : '질문을 찾을 수 없습니다.'}</div>
+        </div>
+      `;
+      return;
+    }
+
+    const questionsHTML = this.questions.map(question => `
+      <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
+        <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
+      </div>
+    `).join('');
+
+    content.innerHTML = questionsHTML;
+
+    // 이벤트 추가
+    content.querySelectorAll('.question-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const index = parseInt(item.dataset.index);
+        const question = this.questions.find(q => q.index === index);
+        if (question && question.element) {
+          this.scrollToQuestion(question.element);
+        }
+      });
+
+      item.addEventListener('mouseenter', (e) => this.showPreview(e, item));
+      item.addEventListener('mouseleave', () => this.hidePreview());
+      item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
+    });
+    
+    this.checkScrollNeed();
   }
 
   createShadowDOM() {
@@ -573,6 +802,8 @@ class AicusNavigator {
     this.createNavigatorHTML();
     this.setupEventListeners();
     this.createPreviewTooltip();
+    
+    setTimeout(() => this.updateContentHeight(), 0);
   }
 
   createNavigatorHTML() {
@@ -791,88 +1022,6 @@ class AicusNavigator {
     closeBtn.addEventListener('click', () => this.hide());
   }
 
-  setupMutationObserver() {
-    // 개선된 SmartObserver 사용
-    this.observer = new SmartObserver(
-      () => this.scanForQuestions(),
-      this.adapter
-    );
-    this.observer.start();
-  }
-
-  scanForQuestions() {
-    let userMessages = this.adapter.getUserMessages();
-
-    // 위→아래 정렬
-    userMessages.sort((a, b) => {
-      const rectA = a.getBoundingClientRect();
-      const rectB = b.getBoundingClientRect();
-      
-      if (Math.abs(rectA.top - rectB.top) > 10) {
-        return rectA.top - rectB.top;
-      }
-      
-      const position = a.compareDocumentPosition(b);
-      return (position & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
-    });
-
-    // 텍스트 추출
-    const questions = [];
-    userMessages.forEach((container, index) => {
-      const text = this.adapter.extractText(container);
-
-      if (text && text.length > 3 && text.length < 10000) {      
-        questions.push({
-          text: text,
-          fullText: text,
-          element: container,
-          index: index + 1
-        });
-      }
-    });
-
-    this.questions = questions;
-    this.updateQuestionsList();
-  }
-
-  updateQuestionsList() {
-    const content = this.shadowRoot.querySelector('.content');
-
-    if (this.questions.length === 0) {
-      content.innerHTML = `
-        <div class="empty-state">
-          <div>질문을 찾을 수 없습니다.</div>
-        </div>
-      `;
-      return;
-    }
-
-    const questionsHTML = this.questions.map(question => `
-      <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
-        <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
-      </div>
-    `).join('');
-
-    content.innerHTML = questionsHTML;
-
-    // 이벤트 추가
-    content.querySelectorAll('.question-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const index = parseInt(item.dataset.index);
-        const question = this.questions.find(q => q.index === index);
-        if (question && question.element) {
-          this.scrollToQuestion(question.element);
-        }
-      });
-
-      item.addEventListener('mouseenter', (e) => this.showPreview(e, item));
-      item.addEventListener('mouseleave', () => this.hidePreview());
-      item.addEventListener('mousemove', (e) => this.updatePreviewPosition(e));
-    });
-    
-    this.checkScrollNeed();
-  }
-
   showPreview(e, item) {
     const fullText = item.dataset.fullText;
     if (!fullText || fullText.length <= 80) return;
@@ -1070,13 +1219,11 @@ class AicusNavigator {
 
     const accentRgb = this.hexToRgb(this.settings.accentColor);
     
-    // 사용자 지정 투명도
     const headerBg = this.blendWithWhite(accentRgb, 0.10);      
     const borderColor = this.blendWithWhite(accentRgb, 0.15);     
     const settingsBg = this.blendWithWhite(accentRgb, 0.08);    
     const hoverBg = this.blendWithWhite(accentRgb, 0.25);       
     
-    // 다크모드용
     const headerBgDark = this.blendWithBlack(accentRgb, 0.2);   
     const borderColorDark = this.blendWithBlack(accentRgb, 0.3); 
     const settingsBgDark = this.blendWithBlack(accentRgb, 0.15); 
@@ -1130,7 +1277,6 @@ class AicusNavigator {
   }
 
   createDonationModal() {
-    // 기존 모달 제거
     const existingModal = document.getElementById('aicus-donation-modal');
     if (existingModal) {
       existingModal.remove();
@@ -1190,25 +1336,25 @@ class AicusNavigator {
         <div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;">
           <button class="korean-btn" style="
             padding: 8px 16px;
-            border: 2px solid ${this.settings.accentColor};
+            border: 2px solid #BCBAE6;
             border-radius: 8px;
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
-            background: ${this.settings.accentColor};
+            background: #BCBAE6;
             color: white;
             transition: all 0.2s ease;
           ">Korean</button>
           
           <button class="international-btn" style="
             padding: 8px 16px;
-            border: 2px solid ${this.settings.accentColor};
+            border: 2px solid #BCBAE6;
             border-radius: 8px;
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
             background: white;
-            color: ${this.settings.accentColor};
+            color: #BCBAE6;
             transition: all 0.2s ease;
           ">International</button>
         </div>
@@ -1255,7 +1401,7 @@ class AicusNavigator {
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
-            background: ${this.settings.accentColor};
+            background: #BCBAE6;
             color: white;
             transition: all 0.2s ease;
           ">닫기</button>
@@ -1265,7 +1411,6 @@ class AicusNavigator {
     
     document.body.appendChild(modal);
     
-    // 모든 이벤트 리스너 설정
     const koreanBtn = modal.querySelector('.korean-btn');
     const internationalBtn = modal.querySelector('.international-btn');
     const qrImage = modal.querySelector('.qr-image');
@@ -1273,35 +1418,35 @@ class AicusNavigator {
     const feedbackBtn = modal.querySelector('.feedback-btn');
     const closeBtnMain = modal.querySelector('.close-btn');
     
-    // QR 코드 전환 기능
+    // QR 코드 전환 (고정 색상)
     koreanBtn.addEventListener('click', () => {
-      koreanBtn.style.background = this.settings.accentColor;
+      koreanBtn.style.background = '#BCBAE6';
       koreanBtn.style.color = 'white';
+      koreanBtn.style.borderColor = '#BCBAE6';
       internationalBtn.style.background = 'white';
-      internationalBtn.style.color = this.settings.accentColor;
+      internationalBtn.style.color = '#BCBAE6';
+      internationalBtn.style.borderColor = '#BCBAE6';
       
       qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png';
       qrImage.alt = '토스 후원 QR코드';
     });
     
     internationalBtn.addEventListener('click', () => {
-      internationalBtn.style.background = this.settings.accentColor;
+      internationalBtn.style.background = '#BCBAE6';
       internationalBtn.style.color = 'white';
+      internationalBtn.style.borderColor = '#BCBAE6';
       koreanBtn.style.background = 'white';
-      koreanBtn.style.color = this.settings.accentColor;
+      koreanBtn.style.color = '#BCBAE6';
+      koreanBtn.style.borderColor = '#BCBAE6';
       
       qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/coffee-qr.png') : 'docs/coffee-qr.png';
       qrImage.alt = 'Buy Me a Coffee QR코드';
     });
     
-    // 닫기 버튼들
     closeModalBtn.addEventListener('click', () => this.hideDonationModal());
     closeBtnMain.addEventListener('click', () => this.hideDonationModal());
-    
-    // 피드백 버튼
     feedbackBtn.addEventListener('click', () => this.sendFeedback());
     
-    // 모달 외부 클릭시 닫기
     modal.addEventListener('click', (e) => {
       if (e.target === modal) {
         this.hideDonationModal();
@@ -1378,13 +1523,12 @@ class AicusNavigator {
     if (this.donationModal) {
       this.donationModal.remove();
     }
-    if (this.rescanTimeout) {
-      clearTimeout(this.rescanTimeout);
-    }
+    
+    console.log('🧭 Aicus destroyed and cleaned up');
   }
 }
 
-// ===== 확장 프로그램 초기화 =====
+// 확장 프로그램 초기화
 let aicusNavigator = null;
 
 function initAicus() {
@@ -1393,6 +1537,7 @@ function initAicus() {
   }
   
   aicusNavigator = new AicusNavigator();
+  console.log('🧭 Aicus initialized');
 }
 
 if (document.readyState === 'loading') {
