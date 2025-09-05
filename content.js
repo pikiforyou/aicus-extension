@@ -17,6 +17,119 @@ class ChatSiteAdapter {
       return bubbles.map(bubble =>
         bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
       ).filter((el, index, arr) => arr.indexOf(el) === index);
+    } else if (this.hostname.includes('copilot.microsoft.com') || 
+               this.hostname.includes('copilot.cloud.microsoft') ||
+               this.hostname.includes('m365.cloud.microsoft') ||
+               this.hostname.includes('bing.com/chat')) {
+      
+      // M365 Copilot을 위한 확장된 셀렉터 목록
+      const copilotSelectors = [
+        // 기존 셀렉터들
+        '.fai-UserMessage__message',
+        '[id^="user-message-"]',
+        '[data-testid="chatOutput"]',
+        '.user-message',
+        '.human-turn',
+        '[data-role="user"]',
+        '.message.user',
+        
+        // M365 Copilot 전용 셀렉터들
+        '[data-testid="user-bubble"]',
+        '[data-testid="user-input-bubble"]',
+        '.user-bubble',
+        '.human-message',
+        '[role="user"]',
+        '[aria-label*="user" i]',
+        '[aria-label*="sent" i]',
+        '.message[data-author="user"]',
+        '.chat-message.user',
+        '.conversation-message.user',
+        
+        // iframe 내부 셀렉터들
+        'iframe[src*="copilot"] .user-message',
+        'iframe[src*="chat"] .user-message',
+        '.copilot-chat .user-message',
+        '.ms-copilot .user-message',
+        
+        // 일반적인 채팅 패턴
+        '.message:not(.assistant):not(.bot):not(.ai)',
+        '[class*="user"]:not([class*="assistant"]):not([class*="bot"])',
+        '.prompt',
+        '.input-message',
+        '.sent-message',
+        
+        // Microsoft UI 패턴
+        '[data-automation-id*="user"]',
+        '[data-automation-id*="input"]',
+        '.ms-Button--user',
+        '.fluent-message.user'
+      ];
+      
+      let userMessages = [];
+      
+      // iframe 내부도 검색
+      const checkInIframes = () => {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            if (iframeDoc) {
+              copilotSelectors.forEach(selector => {
+                try {
+                  const elements = Array.from(iframeDoc.querySelectorAll(selector));
+                  if (elements.length > 0) {
+                    userMessages = userMessages.concat(elements);
+                  }
+                } catch (e) {
+                  // 접근 권한 없음, 무시
+                }
+              });
+            }
+          } catch (e) {
+            // Cross-origin iframe, 무시
+          }
+        });
+      };
+      
+      // 메인 문서에서 검색
+      copilotSelectors.forEach(selector => {
+        try {
+          const elements = Array.from(document.querySelectorAll(selector));
+          if (elements.length > 0) {
+            userMessages = userMessages.concat(elements);
+          }
+        } catch (e) {
+          // 셀렉터 오류 무시
+        }
+      });
+      
+      // iframe도 확인
+      checkInIframes();
+
+      // 중복 제거
+      userMessages = Array.from(new Set(userMessages));
+      
+      // AI 응답 필터링 및 텍스트가 있는 것만 선택
+      const filteredMessages = userMessages.filter(element => {
+        // AI 응답 제외
+        const isAIResponse = element.classList.contains('assistant') || 
+                           element.classList.contains('ai-message') ||
+                           element.classList.contains('bot') ||
+                           element.classList.contains('copilot') ||
+                           element.querySelector('[data-testid="botOutput"]') ||
+                           element.closest('[data-role="assistant"]') ||
+                           element.getAttribute('data-author') === 'assistant' ||
+                           element.getAttribute('data-author') === 'bot';
+        
+        if (isAIResponse) return false;
+        
+        // 텍스트 내용이 있는지 확인
+        const text = this.extractText(element);
+        return text && text.trim().length > 0;
+      });
+      
+      console.log(`M365 Copilot: Found ${filteredMessages.length} user messages`);
+      return filteredMessages;
     }
     return [];
   }
@@ -35,6 +148,47 @@ class ChatSiteAdapter {
           .map(el => el.textContent?.trim())
           .filter(t => t && t.length > 5)
           .join(' ');
+      }
+      return text;
+    } else if (this.hostname.includes('copilot.microsoft.com') || 
+               this.hostname.includes('copilot.cloud.microsoft') ||
+               this.hostname.includes('m365.cloud.microsoft') ||
+               this.hostname.includes('bing.com/chat')) {
+      
+      // M365 Copilot용 텍스트 추출 개선
+      const chatOutput = container.querySelector('[data-testid="chatOutput"]');
+      if (chatOutput) {
+        return chatOutput.textContent?.trim() || '';
+      }
+      
+      // 다양한 텍스트 컨테이너 시도
+      const textContainers = [
+        container.querySelector('.message-text'),
+        container.querySelector('.user-text'),
+        container.querySelector('.prompt-text'),
+        container.querySelector('[data-content]'),
+        container.querySelector('p'),
+        container.querySelector('div[role="text"]'),
+        container.querySelector('.text-content')
+      ].filter(el => el);
+      
+      for (const textContainer of textContainers) {
+        const text = textContainer.textContent?.trim();
+        if (text && text.length > 0) {
+          return text;
+        }
+      }
+      
+      // 직접 텍스트 추출
+      let text = container.textContent?.trim();
+      if (!text) {
+        const textElements = container.querySelectorAll('p, div, span');
+        if (textElements.length > 0) {
+          text = Array.from(textElements)
+            .map(el => el.textContent?.trim())
+            .filter(t => t && t.length > 3) // 더 짧은 텍스트도 허용
+            .join(' ');
+        }
       }
       return text;
     }
@@ -60,6 +214,43 @@ class ChatSiteAdapter {
              node.querySelector('.user-query-bubble-with-background') ||
              node.matches('main[role="main"]') ||
              node.closest('main[role="main"]');
+    } else if (this.hostname.includes('copilot.microsoft.com') || 
+               this.hostname.includes('copilot.cloud.microsoft') ||
+               this.hostname.includes('m365.cloud.microsoft') ||
+               this.hostname.includes('bing.com/chat')) {
+      
+      // M365 Copilot 채팅 관련 노드 판단 개선
+      const chatRelatedSelectors = [
+        '.fai-UserMessage__message',
+        '[id^="user-message-"]',
+        '[data-testid="chatOutput"]',
+        '[data-testid*="conversation"]',
+        '[data-testid*="chat"]',
+        '.user-message',
+        '.human-turn',
+        '[data-role="user"]',
+        '.message',
+        '.chat-message',
+        '.conversation-message',
+        '.user-bubble',
+        '[class*="chat"]',
+        '[class*="message"]',
+        '[class*="conversation"]',
+        'main[role="main"]',
+        '[role="main"]',
+        '.copilot-chat',
+        '.ms-copilot'
+      ];
+      
+      return chatRelatedSelectors.some(selector => {
+        try {
+          return node.matches(selector) || 
+                 node.querySelector(selector) || 
+                 node.closest(selector);
+        } catch (e) {
+          return false;
+        }
+      });
     }
     
     return false;
@@ -73,6 +264,56 @@ class ChatSiteAdapter {
       return !!document.querySelector('[data-testid="user-message"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
       return !!document.querySelector('.user-query-bubble-with-background');
+    } else if (this.hostname.includes('copilot.microsoft.com') || 
+               this.hostname.includes('copilot.cloud.microsoft') ||
+               this.hostname.includes('m365.cloud.microsoft') ||
+               this.hostname.includes('bing.com/chat')) {
+      
+      // M365 Copilot 채팅 페이지 감지 개선
+      const chatIndicators = [
+        '.fai-UserMessage__message',
+        '[id^="user-message-"]',
+        '[data-testid="chatOutput"]',
+        '.user-message',
+        '.human-turn',
+        '[data-role="user"]',
+        '.message',
+        '.chat-message',
+        '.conversation-message',
+        '.user-bubble',
+        '[data-testid*="chat"]',
+        '[class*="chat"]',
+        'input[type="text"]', // 채팅 입력창
+        'textarea[placeholder*="Ask"]', // Ask Copilot 입력창
+        '[placeholder*="chat" i]',
+        '[placeholder*="message" i]'
+      ];
+      
+      return chatIndicators.some(selector => {
+        try {
+          return !!document.querySelector(selector);
+        } catch (e) {
+          return false;
+        }
+      }) || 
+      // iframe 내부도 확인
+      Array.from(document.querySelectorAll('iframe')).some(iframe => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+          if (iframeDoc) {
+            return chatIndicators.some(selector => {
+              try {
+                return !!iframeDoc.querySelector(selector);
+              } catch (e) {
+                return false;
+              }
+            });
+          }
+        } catch (e) {
+          return false;
+        }
+        return false;
+      });
     }
     return false;
   }
@@ -92,6 +333,9 @@ class OptimizedObserver {
     // SPA 감지를 위한 URL 추적
     this.lastUrl = window.location.href;
     this.urlCheckTimer = null;
+    
+    // M365 Copilot용 특별 처리
+    this.iframeObservers = [];
   }
 
   start() {
@@ -111,6 +355,9 @@ class OptimizedObserver {
     // URL 변화 감지 설정
     this.setupUrlWatcher();
     
+    // M365 Copilot용 iframe 감시 설정
+    this.setupIframeWatchers();
+    
     this.isObserving = true;
     console.log('🧭 OptimizedObserver started');
   }
@@ -121,11 +368,51 @@ class OptimizedObserver {
       this.observer = null;
     }
     
+    // iframe observers 정리
+    this.iframeObservers.forEach(obs => obs.disconnect());
+    this.iframeObservers = [];
+    
     this.clearTimers();
     this.cleanupUrlWatcher();
     this.isObserving = false;
     
     console.log('🧭 OptimizedObserver stopped');
+  }
+
+  setupIframeWatchers() {
+    // M365 Copilot의 iframe 감시
+    const watchIframes = () => {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach(iframe => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+          if (iframeDoc && !iframe.dataset.aicusWatched) {
+            iframe.dataset.aicusWatched = 'true';
+            
+            const iframeObserver = new MutationObserver((mutations) => {
+              console.log('🧭 Iframe mutation detected');
+              this.handleMutations(mutations);
+            });
+            
+            iframeObserver.observe(iframeDoc.body || iframeDoc, {
+              childList: true,
+              subtree: true,
+              attributes: false
+            });
+            
+            this.iframeObservers.push(iframeObserver);
+          }
+        } catch (e) {
+          // Cross-origin iframe 접근 불가, 무시
+        }
+      });
+    };
+    
+    // 초기 iframe 검사
+    setTimeout(watchIframes, 1000);
+    
+    // 주기적으로 새로운 iframe 확인
+    this.iframeCheckTimer = setInterval(watchIframes, 5000);
   }
 
   setupUrlWatcher() {
@@ -177,6 +464,11 @@ class OptimizedObserver {
       clearInterval(this.urlCheckTimer);
       this.urlCheckTimer = null;
     }
+    
+    if (this.iframeCheckTimer) {
+      clearInterval(this.iframeCheckTimer);
+      this.iframeCheckTimer = null;
+    }
   }
 
   onUrlChange() {
@@ -188,6 +480,8 @@ class OptimizedObserver {
       // URL 변경 시 잠시 후 스캔 (DOM 로딩 대기)
       setTimeout(() => {
         this.forceScan();
+        // iframe 재검사
+        this.setupIframeWatchers();
       }, 500);
     }
   }
@@ -323,7 +617,7 @@ class AicusNavigator {
     this.observer.start();
   }
 
-  scanForQuestions() {
+  scanForQuestions() { 
     let userMessages = this.adapter.getUserMessages();
 
     // 위→아래 정렬
@@ -361,19 +655,17 @@ class AicusNavigator {
     console.log(`🧭 Found ${questions.length} valid questions`);
   }
 
-  // 질문 유효성 검사 (2글자 이상 허용, 시스템 텍스트 제외)
+  // 질문 유효성 검사
   isValidQuestion(text) {
     if (!text || text.length < 2 || text.length > 10000) {
       return false;
     }
     
-    // 의미있는 텍스트인지 확인 (공백, 특수문자만으로 이루어진 것 제외)
     const meaningfulText = text.trim().replace(/[\s\n\r\t]/g, '');
     if (meaningfulText.length < 2) {
       return false;
     }
     
-    // 시스템 텍스트 제외 (Claude의 "계속" 버튼 등)
     const systemTexts = ['계속', 'continue', '继续', 'continuer', 'continuar', 'fortsetzung'];
     const lowerText = text.toLowerCase().trim();
     
@@ -388,7 +680,6 @@ class AicusNavigator {
     const content = this.shadowRoot.querySelector('.content');
 
     if (this.questions.length === 0) {
-      // 현재 페이지 상태에 따라 다른 메시지 표시
       const isOnChat = this.adapter.isOnChatPage();
       
       content.innerHTML = `
@@ -765,7 +1056,7 @@ class AicusNavigator {
       .dark .resize-handle {
         background: linear-gradient(-45deg, transparent 30%, rgba(255,255,255,0.1) 30%, rgba(255,255,255,0.1) 70%, transparent 70%);
       }
-
+      
       .preview-tooltip {
         position: absolute;
         background: rgba(0, 0, 0, 0.9);
@@ -879,17 +1170,14 @@ class AicusNavigator {
     const resizeHandle = this.shadowRoot.querySelector('.resize-handle');
     const coffeeSection = this.shadowRoot.querySelector('.coffee-section');
 
-    // 커피 섹션 클릭
     if (coffeeSection) {
       coffeeSection.addEventListener('click', () => this.showDonationModal());
     }
 
-    // 드래그 변수
     let isDragging = false;
     let dragMoved = false;
     let startX, startY, startLeft, startTop;
 
-    // 드래그 시작
     const startDrag = (e) => {
       if (e.target.closest('.controls') || e.target.closest('.resize-handle') || 
           e.target.closest('.main-icon') || e.target.closest('.title')) return;
@@ -907,27 +1195,21 @@ class AicusNavigator {
       e.preventDefault();
     };
 
-    // 드래그 중
     const drag = (e) => {
       if (!isDragging) return;
-
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
-
       if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
         dragMoved = true;
       }
-      
       const containerWidth = this.isMinimized ? 60 : 320;
       const newLeft = Math.max(0, Math.min(window.innerWidth - containerWidth, startLeft + deltaX));
       const newTop = Math.max(0, Math.min(window.innerHeight - 100, startTop + deltaY));
-
       this.container.style.left = newLeft + 'px';
       this.container.style.top = newTop + 'px';
       this.container.style.right = 'auto';
     };
 
-    // 드래그 종료
     const stopDrag = () => {
       isDragging = false;
       document.removeEventListener('mousemove', drag);
@@ -936,7 +1218,6 @@ class AicusNavigator {
 
     header.addEventListener('mousedown', startDrag);
 
-    // 리사이즈 기능
     let isResizing = false;
     let startWidth, startHeight;
 
@@ -946,7 +1227,6 @@ class AicusNavigator {
       startHeight = navigator.offsetHeight;
       startX = e.clientX;
       startY = e.clientY;
-      
       document.addEventListener('mousemove', resize);
       document.addEventListener('mouseup', stopResize);
       e.preventDefault();
@@ -955,16 +1235,12 @@ class AicusNavigator {
 
     const resize = (e) => {
       if (!isResizing) return;
-      
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
-      
       const newWidth = Math.max(250, Math.min(500, startWidth + deltaX));
       const newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
-      
       navigator.style.width = newWidth + 'px';
       navigator.style.maxHeight = newHeight + 'px';
-      
       this.updateContentHeight();
     };
 
@@ -976,7 +1252,6 @@ class AicusNavigator {
 
     resizeHandle.addEventListener('mousedown', startResize);
 
-    // 아이콘/타이틀 클릭 - 최소화/복원
     mainIcon.addEventListener('click', (e) => {
       this.toggleMinimize();
       e.preventDefault();
@@ -989,7 +1264,6 @@ class AicusNavigator {
       e.stopPropagation();
     });
 
-    // 최소화 아이콘 클릭
     minimizedIcon.addEventListener('click', (e) => {
       if (!dragMoved) {
         this.toggleMinimize();
@@ -997,7 +1271,6 @@ class AicusNavigator {
       e.preventDefault();
     });
 
-    // 최소화 아이콘 드래그
     minimizedIcon.addEventListener('mousedown', (e) => {
       isDragging = true;
       dragMoved = false;
@@ -1006,13 +1279,11 @@ class AicusNavigator {
       const rect = this.container.getBoundingClientRect();
       startLeft = rect.left;
       startTop = rect.top;
-      
       document.addEventListener('mousemove', drag);
       document.addEventListener('mouseup', stopDrag);
       e.preventDefault();
     });
 
-    // 컨트롤 버튼들
     settingsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.toggleSettings();
@@ -1025,7 +1296,6 @@ class AicusNavigator {
   showPreview(e, item) {
     const fullText = item.dataset.fullText;
     if (!fullText || fullText.length <= 80) return;
-
     this.previewTooltip.textContent = fullText;
     this.previewTooltip.classList.add('show');
     this.updatePreviewPosition(e);
@@ -1037,21 +1307,16 @@ class AicusNavigator {
 
   updatePreviewPosition(e) {
     if (!this.previewTooltip.classList.contains('show')) return;
-
     const rect = this.container.getBoundingClientRect();
     const tooltipRect = this.previewTooltip.getBoundingClientRect();
-
     let left = e.clientX - rect.left + 10;
     let top = e.clientY - rect.top - tooltipRect.height - 10;
-
     if (left + tooltipRect.width > rect.width) {
       left = e.clientX - rect.left - tooltipRect.width - 10;
     }
-
     if (top < 0) {
       top = e.clientY - rect.top + 10;
     }
-
     this.previewTooltip.style.left = left + 'px';
     this.previewTooltip.style.top = top + 'px';
   }
@@ -1065,9 +1330,7 @@ class AicusNavigator {
     document.querySelectorAll('.aicus-highlight').forEach(el => {
       el.classList.remove('aicus-highlight');
     });
-
     element.classList.add('aicus-highlight');
-
     if (!document.getElementById('aicus-highlight-style')) {
       const style = document.createElement('style');
       style.id = 'aicus-highlight-style';
@@ -1080,7 +1343,6 @@ class AicusNavigator {
       `;
       document.head.appendChild(style);
     }
-
     setTimeout(() => {
       element.classList.remove('aicus-highlight');
     }, 3000);
@@ -1090,7 +1352,6 @@ class AicusNavigator {
     this.isCollapsed = !this.isCollapsed;
     const navigator = this.shadowRoot.querySelector('.navigator');
     const collapseBtn = this.shadowRoot.querySelector('.collapse-btn');
-
     if (this.isCollapsed) {
       navigator.classList.add('collapsed');
       collapseBtn.textContent = '+';
@@ -1105,38 +1366,30 @@ class AicusNavigator {
   toggleMinimize() {
     this.isMinimized = !this.isMinimized;
     const navigator = this.shadowRoot.querySelector('.navigator');
-
     if (this.isMinimized) {
       this.savedStyles = {
         width: navigator.style.width,
         maxHeight: navigator.style.maxHeight
       };
-      
       navigator.classList.add('minimized');
       this.container.style.width = '60px';
       this.container.style.height = '60px';
-      
       const currentRight = parseInt(this.container.style.right) || 20;
       this.container.style.right = currentRight + 'px';
       this.container.style.left = 'auto';
-      
       this.showSettings = false;
       navigator.classList.remove('show-settings');
       this.hidePreview();
     } else {
       navigator.classList.remove('minimized');
-      
       this.container.style.width = 'auto';
       this.container.style.height = 'auto';
-      
       const currentRight = parseInt(this.container.style.right) || 20;
       this.container.style.right = currentRight + 'px';
       this.container.style.left = 'auto';
-      
       if (this.savedStyles) {
         navigator.style.width = this.savedStyles.width || '320px';
         navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
-        
         setTimeout(() => this.updateContentHeight(), 0);
       }
     }
@@ -1145,13 +1398,11 @@ class AicusNavigator {
   toggleSettings() {
     this.showSettings = !this.showSettings;
     const navigator = this.shadowRoot.querySelector('.navigator');
-
     if (this.showSettings) {
       navigator.classList.add('show-settings');
     } else {
       navigator.classList.remove('show-settings');
     }
-    
     setTimeout(() => this.updateContentHeight(), 0);
   }
 
@@ -1160,30 +1411,24 @@ class AicusNavigator {
     const content = this.shadowRoot.querySelector('.content');
     const header = this.shadowRoot.querySelector('.header');
     const settingsPanel = this.shadowRoot.querySelector('.settings-panel');
-    
     if (!navigator || !content || !header) return;
-    
     const navigatorMaxHeight = parseInt(navigator.style.maxHeight) || parseInt(getComputedStyle(navigator).maxHeight) || 500;
     const headerHeight = header.offsetHeight;
     const settingsHeight = this.showSettings && settingsPanel ? settingsPanel.offsetHeight : 0;
     const resizeHandleHeight = 16;
     const padding = 20;
-    
     const availableHeight = navigatorMaxHeight - headerHeight - settingsHeight - resizeHandleHeight - padding;
     const finalHeight = Math.max(100, availableHeight);
     content.style.maxHeight = finalHeight + 'px';
-    
     this.checkScrollNeed();
   }
 
   checkScrollNeed() {
     const content = this.shadowRoot.querySelector('.content');
     if (!content) return;
-    
     setTimeout(() => {
       const contentHeight = content.scrollHeight;
       const maxHeight = parseInt(content.style.maxHeight) || 300;
-      
       if (contentHeight > maxHeight) {
         content.classList.add('scrollable');
       } else {
@@ -1194,7 +1439,6 @@ class AicusNavigator {
 
   updateColorPalette() {
     const colorPalette = this.shadowRoot.querySelector('.color-palette');
-
     colorPalette.innerHTML = this.colorPalette.map(color => `
       <div class="color-option ${color.color === this.settings.accentColor ? 'selected' : ''}" 
            style="background-color: ${color.color};" 
@@ -1202,7 +1446,6 @@ class AicusNavigator {
            title="${color.name}">
       </div>
     `).join('');
-
     colorPalette.addEventListener('click', (e) => {
       if (e.target.classList.contains('color-option')) {
         const newColor = e.target.dataset.color;
@@ -1216,36 +1459,29 @@ class AicusNavigator {
   applyColorScheme() {
     const navigator = this.shadowRoot.querySelector('.navigator');
     navigator.style.setProperty('--accent-color', this.settings.accentColor);
-
     const accentRgb = this.hexToRgb(this.settings.accentColor);
-    
-    const headerBg = this.blendWithWhite(accentRgb, 0.10);      
-    const borderColor = this.blendWithWhite(accentRgb, 0.15);     
-    const settingsBg = this.blendWithWhite(accentRgb, 0.08);    
-    const hoverBg = this.blendWithWhite(accentRgb, 0.25);       
-    
-    const headerBgDark = this.blendWithBlack(accentRgb, 0.2);   
-    const borderColorDark = this.blendWithBlack(accentRgb, 0.3); 
-    const settingsBgDark = this.blendWithBlack(accentRgb, 0.15); 
-    const hoverBgDark = this.blendWithBlack(accentRgb, 0.3);    
-
+    const headerBg = this.blendWithWhite(accentRgb, 0.10);
+    const borderColor = this.blendWithWhite(accentRgb, 0.15);
+    const settingsBg = this.blendWithWhite(accentRgb, 0.08);
+    const hoverBg = this.blendWithWhite(accentRgb, 0.25);
+    const headerBgDark = this.blendWithBlack(accentRgb, 0.2);
+    const borderColorDark = this.blendWithBlack(accentRgb, 0.3);
+    const settingsBgDark = this.blendWithBlack(accentRgb, 0.15);
+    const hoverBgDark = this.blendWithBlack(accentRgb, 0.3);
     navigator.style.setProperty('--header-bg', headerBg);
     navigator.style.setProperty('--border-color', borderColor);
     navigator.style.setProperty('--settings-bg', settingsBg);
     navigator.style.setProperty('--hover-bg', hoverBg);
-    
     navigator.style.setProperty('--header-bg-dark', headerBgDark);
     navigator.style.setProperty('--border-color-dark', borderColorDark);
     navigator.style.setProperty('--settings-bg-dark', settingsBgDark);
     navigator.style.setProperty('--hover-bg-dark', hoverBgDark);
-    
     this.updateTheme();
   }
 
   updateTheme() {
     const navigator = this.shadowRoot.querySelector('.navigator');
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
     if (isDark) {
       navigator.classList.add('dark');
     } else {
@@ -1276,139 +1512,15 @@ class AicusNavigator {
     } : { r: 188, g: 186, b: 230 };
   }
 
-  createDonationModal() {
+createDonationModal() {
     const existingModal = document.getElementById('aicus-donation-modal');
     if (existingModal) {
       existingModal.remove();
     }
-    
     const modal = document.createElement('div');
     modal.id = 'aicus-donation-modal';
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0, 0, 0, 0.6);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      z-index: 999999;
-      backdrop-filter: blur(4px);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-    
-    modal.innerHTML = `
-      <div id="modal-content" style="
-        background: white;
-        border-radius: 16px;
-        padding: 24px;
-        max-width: 320px;
-        width: 90%;
-        text-align: center;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        transform: scale(0.9);
-        transition: transform 0.2s ease;
-        position: relative;
-      ">
-        <button class="close-modal-btn" style="
-          position: absolute;
-          top: 16px;
-          right: 16px;
-          width: 24px;
-          height: 24px;
-          border: none;
-          background: none;
-          cursor: pointer;
-          font-size: 18px;
-          color: #999;
-        ">×</button>
-        
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #333;">
-          프로그램이 유용했다면<br>개발자를 응원해주세요!
-        </div>
-        
-        <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
-          QR코드를 스캔해서 후원할 수 있어요
-        </div>
-        
-        <div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;">
-          <button class="korean-btn" style="
-            padding: 8px 16px;
-            border: 2px solid #BCBAE6;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            background: #BCBAE6;
-            color: white;
-            transition: all 0.2s ease;
-          ">Korean</button>
-          
-          <button class="international-btn" style="
-            padding: 8px 16px;
-            border: 2px solid #BCBAE6;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            background: white;
-            color: #BCBAE6;
-            transition: all 0.2s ease;
-          ">International</button>
-        </div>
-        
-        <div style="
-          width: 160px;
-          height: 160px;
-          margin: 0 auto 20px auto;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-          background: #f0f0f0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #666;
-          font-size: 12px;
-        ">
-          <img class="qr-image" src="${chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png'}" 
-               alt="후원 QR코드" 
-               style="width: 100%; height: 100%; object-fit: cover;"
-               onerror="this.style.display='none'; this.parentElement.innerHTML='QR 코드를 불러올 수 없습니다';">
-        </div>
-        
-        <div style="display: flex; gap: 12px; margin-top: 20px;">
-          <button class="feedback-btn" style="
-            flex: 1;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            background: #f0f0f0;
-            color: #333;
-            transition: all 0.2s ease;
-          ">피드백 보내주기</button>
-          
-          <button class="close-btn" style="
-            flex: 1;
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            background: #BCBAE6;
-            color: white;
-            transition: all 0.2s ease;
-          ">닫기</button>
-        </div>
-      </div>
-    `;
-    
+    modal.style.cssText = `position: fixed;top: 0;left: 0;width: 100vw;height: 100vh;background: rgba(0, 0, 0, 0.6);display: none;justify-content: center;align-items: center;z-index: 999999;backdrop-filter: blur(4px);font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;`;
+    modal.innerHTML = `<div id="modal-content" style="background: white;border-radius: 16px;padding: 24px;max-width: 320px;width: 90%;text-align: center;box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);transform: scale(0.9);transition: transform 0.2s ease;position: relative;"><button class="close-modal-btn" style="position: absolute;top: 16px;right: 16px;width: 24px;height: 24px;border: none;background: none;cursor: pointer;font-size: 18px;color: #999;">×</button><div style="font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #333;">프로그램이 유용했다면<br>개발자를 응원해주세요!</div><div style="font-size: 14px; color: #666; margin-bottom: 20px;">QR코드를 스캔해서 후원할 수 있어요</div><div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;"><button class="korean-btn" style="padding: 8px 16px;border: 2px solid #BCBAE6;border-radius: 8px;font-size: 12px;font-weight: 500;cursor: pointer;background: #BCBAE6;color: white;transition: all 0.2s ease;">Korean</button><button class="international-btn" style="padding: 8px 16px;border: 2px solid #BCBAE6;border-radius: 8px;font-size: 12px;font-weight: 500;cursor: pointer;background: white;color: #BCBAE6;transition: all 0.2s ease;">International</button></div><div style="width: 160px;height: 160px;margin: 0 auto 20px auto;border-radius: 12px;overflow: hidden;box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);background: #f0f0f0;display: flex;align-items: center;justify-content: center;color: #666;font-size: 12px;"><img class="qr-image" src="${chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png'}" alt="후원 QR코드" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.parentElement.innerHTML='QR 코드를 불러올 수 없습니다';"></div><div style="display: flex; gap: 12px; margin-top: 20px;"><button class="feedback-btn" style="flex: 1;padding: 10px 16px;border: none;border-radius: 8px;font-size: 13px;font-weight: 500;cursor: pointer;background: #f0f0f0;color: #333;transition: all 0.2s ease;">피드백 보내주기</button><button class="close-btn" style="flex: 1;padding: 10px 16px;border: none;border-radius: 8px;font-size: 13px;font-weight: 500;cursor: pointer;background: #BCBAE6;color: white;transition: all 0.2s ease;">닫기</button></div></div>`;
     document.body.appendChild(modal);
     
     const koreanBtn = modal.querySelector('.korean-btn');
@@ -1418,7 +1530,6 @@ class AicusNavigator {
     const feedbackBtn = modal.querySelector('.feedback-btn');
     const closeBtnMain = modal.querySelector('.close-btn');
     
-    // QR 코드 전환 (고정 색상)
     koreanBtn.addEventListener('click', () => {
       koreanBtn.style.background = '#BCBAE6';
       koreanBtn.style.color = 'white';
@@ -1426,7 +1537,6 @@ class AicusNavigator {
       internationalBtn.style.background = 'white';
       internationalBtn.style.color = '#BCBAE6';
       internationalBtn.style.borderColor = '#BCBAE6';
-      
       qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/daram-qr.png') : 'docs/daram-qr.png';
       qrImage.alt = '토스 후원 QR코드';
     });
@@ -1438,7 +1548,6 @@ class AicusNavigator {
       koreanBtn.style.background = 'white';
       koreanBtn.style.color = '#BCBAE6';
       koreanBtn.style.borderColor = '#BCBAE6';
-      
       qrImage.src = chrome.runtime ? chrome.runtime.getURL('docs/coffee-qr.png') : 'docs/coffee-qr.png';
       qrImage.alt = 'Buy Me a Coffee QR코드';
     });
@@ -1460,7 +1569,6 @@ class AicusNavigator {
     if (!this.donationModal) {
       this.createDonationModal();
     }
-    
     this.donationModal.style.display = 'flex';
     setTimeout(() => {
       const content = this.donationModal.querySelector('#modal-content');
@@ -1476,7 +1584,6 @@ class AicusNavigator {
       if (content) {
         content.style.transform = 'scale(0.9)';
       }
-      
       setTimeout(() => {
         this.donationModal.style.display = 'none';
       }, 200);
@@ -1487,7 +1594,6 @@ class AicusNavigator {
     const subject = encodeURIComponent('Aicus 확장 프로그램 피드백');
     const body = encodeURIComponent('안녕하세요!\n\nAicus 확장 프로그램에 대한 피드백을 보내드립니다.\n\n피드백 내용:\n- \n\n감사합니다!');
     const mailtoLink = `mailto:pikiforyou@gmail.com?subject=${subject}&body=${body}`;
-    
     window.open(mailtoLink);
     this.hideDonationModal();
   }
@@ -1523,7 +1629,6 @@ class AicusNavigator {
     if (this.donationModal) {
       this.donationModal.remove();
     }
-    
     console.log('🧭 Aicus destroyed and cleaned up');
   }
 }
@@ -1535,7 +1640,6 @@ function initAicus() {
   if (aicusNavigator) {
     aicusNavigator.destroy();
   }
-  
   aicusNavigator = new AicusNavigator();
   console.log('🧭 Aicus initialized');
 }
