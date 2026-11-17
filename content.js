@@ -150,9 +150,12 @@ class ChatSiteAdapter {
     } else if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
       return container.textContent?.trim();
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
-      let text = container.textContent?.trim();
+      // 화면낭독기용 숨김 제목(h5.cdk-visually-hidden: "말씀하신 내용 " + 질문 앞부분)을 제외하고 추출
+      const clone = container.cloneNode(true);
+      clone.querySelectorAll('.cdk-visually-hidden').forEach(el => el.remove());
+      let text = clone.textContent?.trim();
       if (!text) {
-        const textElements = container.querySelectorAll('p, div, span');
+        const textElements = clone.querySelectorAll('p, div, span');
         text = Array.from(textElements)
           .map(el => el.textContent?.trim())
           .filter(t => t && t.length > 5)
