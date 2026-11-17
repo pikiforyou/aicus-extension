@@ -1601,10 +1601,14 @@ createDonationModal() {
     }
   }
 
+  // 텍스트 노드와 속성값(data-full-text="...") 양쪽에 안전하도록 따옴표까지 이스케이프
   escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   destroy() {
