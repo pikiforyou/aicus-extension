@@ -504,6 +504,9 @@ class OptimizedObserver {
     }
 
     console.log(`🧭 Detected ${relevantMutations.length} relevant mutations`);
+    if (this.onRelevantMutation) {
+      this.onRelevantMutation();
+    }
     this.debouncedScan();
   }
 
@@ -561,6 +564,7 @@ class AicusNavigator {
 
     // 가상화 사이트(Claude, ChatGPT)용 누적 목록: data-turn-key → { key, text, y, element }
     this.questionMap = new Map();
+    this.questionOrder = [];
     this.questionMapUrl = window.location.href;
     this.scroller = null;
     this.previewTooltip = null;
@@ -617,6 +621,7 @@ class AicusNavigator {
       () => this.scanForQuestions(),
       this.adapter
     );
+    this.observer.onRelevantMutation = () => this.captureRendered();
     this.observer.start();
   }
 
@@ -624,11 +629,7 @@ class AicusNavigator {
     let userMessages = this.adapter.getUserMessages();
 
     // 다른 대화로 이동했으면 누적 목록 초기화 (URL 폴링 2초를 기다리지 않고 스캔 시점에 바로 판정)
-    if (window.location.href !== this.questionMapUrl) {
-      this.questionMap.clear();
-      this.questionMapUrl = window.location.href;
-      this.scroller = null;
-    }
+    this.resetIfUrlChanged();
 
     // 안정적인 키(data-turn-key)가 있는 사이트는 화면 밖으로 빠진 질문도 유지하도록 누적
     if (this.questionMap.size > 0 || userMessages.some(el => this.getTurnKey(el))) {
@@ -700,9 +701,22 @@ class AicusNavigator {
     return Math.round(el.getBoundingClientRect().top - top + scroller.scrollTop);
   }
 
-  mergeKeyedQuestions(userMessages) {
-    const renderedKeys = new Set();
-    let scroller = this.scroller;
+  resetIfUrlChanged() {
+    if (window.location.href !== this.questionMapUrl) {
+      this.questionMap.clear();
+      this.questionOrder = [];
+      this.questionMapUrl = window.location.href;
+      this.scroller = null;
+    }
+  }
+
+  // 지금 DOM에 있는 질문을 누적 목록에 병합. 순서는 위치값이 아니라 DOM 순서로 정한다
+  // (가상화 사이트는 렌더 직후 위치가 확정되지 않아 위치값 정렬이 뒤섞임)
+  // 반환값: 새 질문이 추가되었거나 텍스트가 바뀌었는지
+  mergeRendered(userMessages, measure) {
+    let changed = false;
+    let lastIdx = -1;
+    let scroller = null;
 
     userMessages.forEach(el => {
       const key = this.getTurnKey(el);
@@ -710,28 +724,57 @@ class AicusNavigator {
       const text = this.adapter.extractText(el);
       if (!text || !this.isValidQuestion(text)) return;
 
-      scroller = this.findScroller(el);
-      renderedKeys.add(key);
-      this.questionMap.set(key, { key, text, y: this.getScrollY(el, scroller), element: el });
+      const prev = this.questionMap.get(key);
+      if (!prev || prev.text !== text) changed = true;
+
+      let y = prev ? prev.y : null;
+      if (measure) {
+        scroller = this.findScroller(el);
+        y = this.getScrollY(el, scroller);
+      }
+      this.questionMap.set(key, { key, text, y, element: el });
+
+      // 앞에서 처리한 질문 바로 뒤에 오도록 순서 병합
+      const idx = this.questionOrder.indexOf(key);
+      if (idx === -1) {
+        this.questionOrder.splice(lastIdx + 1, 0, key);
+        lastIdx += 1;
+      } else if (idx > lastIdx) {
+        lastIdx = idx;
+      } else {
+        this.questionOrder.splice(idx, 1);
+        this.questionOrder.splice(lastIdx, 0, key);
+        changed = true;
+      }
     });
 
-    // 화면에 보이는 구간 안에 있어야 할 질문이 DOM에 없으면 삭제/수정된 것으로 보고 제거
-    if (scroller) {
-      const viewTop = scroller.scrollTop + 20;
-      const viewBottom = scroller.scrollTop + scroller.clientHeight - 20;
-      for (const [key, q] of this.questionMap) {
-        if (!renderedKeys.has(key) && q.y > viewTop && q.y < viewBottom) {
-          this.questionMap.delete(key);
-        }
-      }
-    }
+    return changed;
+  }
 
-    this.questions = Array.from(this.questionMap.values())
-      .sort((a, b) => a.y - b.y)
+  buildKeyedQuestions() {
+    this.questions = this.questionOrder
+      .map(key => this.questionMap.get(key))
+      .filter(Boolean)
       .map((q, i) => ({ ...q, fullText: q.text, index: i + 1 }));
+  }
+
+  // 변화가 감지될 때마다 즉시 호출: 잠깐만 렌더되고 빠지는 질문도 놓치지 않도록 키와 텍스트만 기록
+  captureRendered() {
+    this.resetIfUrlChanged();
+    const userMessages = this.adapter.getUserMessages();
+    if (this.questionMap.size === 0 && !userMessages.some(el => this.getTurnKey(el))) return;
+    if (this.mergeRendered(userMessages, false)) {
+      this.buildKeyedQuestions();
+      this.updateQuestionsList();
+    }
+  }
+
+  mergeKeyedQuestions(userMessages) {
+    this.mergeRendered(userMessages, true);
+    this.buildKeyedQuestions();
     this.updateQuestionsList();
 
-    console.log(`🧭 Found ${this.questions.length} valid questions (rendered ${renderedKeys.size})`);
+    console.log(`🧭 Found ${this.questions.length} valid questions (rendered ${userMessages.length})`);
   }
 
   // 질문 유효성 검사
@@ -1436,21 +1479,39 @@ class AicusNavigator {
       return;
     }
 
-    // DOM에서 빠진 질문: 저장된 위치로 먼저 이동해 렌더시킨 뒤 다시 찾기
-    const scroller = this.scroller;
-    if (!scroller || !scroller.isConnected) return;
-    scroller.scrollTop = Math.max(0, question.y - scroller.clientHeight / 2);
+    // DOM에서 빠진 질문: 저장된 위치(있으면)로 먼저 이동한 뒤,
+    // 지금 렌더된 질문들과 목록 순서를 비교해 위/아래로 한 화면씩 이동하며 다시 찾기
+    const anyRendered = this.adapter.getUserMessages()[0];
+    const scroller = this.scroller && this.scroller.isConnected
+      ? this.scroller
+      : (anyRendered ? this.findScroller(anyRendered) : null);
+    if (!scroller) return;
+
+    const targetIdx = this.questionOrder.indexOf(question.key);
+    if (question.y != null) {
+      scroller.scrollTop = Math.max(0, question.y - scroller.clientHeight / 2);
+    }
 
     let tries = 0;
-    const retry = () => {
+    const step = () => {
       const el = findLive();
       if (el) {
         scrollAndSettle(el);
-      } else if (++tries < 3) {
-        setTimeout(retry, 300);
+        return;
       }
+      if (++tries > 15) return;
+
+      // 렌더된 질문 중 목록에서 가장 앞선 것 기준으로 방향 결정
+      // (Claude는 마지막 질문을 항상 렌더해 두므로 최댓값이 아니라 최솟값을 기준으로 삼는다)
+      const renderedIdx = this.adapter.getUserMessages()
+        .map(m => this.questionOrder.indexOf(this.getTurnKey(m)))
+        .filter(i => i >= 0);
+      const minIdx = renderedIdx.length ? Math.min(...renderedIdx) : -1;
+      const dir = minIdx === -1 || targetIdx < minIdx ? -1 : 1;
+      scroller.scrollTop += dir * scroller.clientHeight * 0.8;
+      setTimeout(step, 250);
     };
-    setTimeout(retry, 300);
+    setTimeout(step, 250);
   }
 
   highlightElement(element) {
