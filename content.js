@@ -6,7 +6,9 @@ class ChatSiteAdapter {
 
   getUserMessages() {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'));
+      // ChatGPT는 다른 대화로 이동해도 이전 대화의 질문을 숨긴 채 DOM에 남겨두므로 보이는 것만 사용
+      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'))
+        .filter(el => this.isElementVisible(el));
     } else if (this.hostname.includes('claude.ai')) {
       return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
@@ -134,6 +136,13 @@ class ChatSiteAdapter {
     return [];
   }
 
+  // display:none 등으로 숨겨진 요소 제외 (checkVisibility 미지원 브라우저는 offsetParent로 판정)
+  isElementVisible(el) {
+    return typeof el.checkVisibility === 'function'
+      ? el.checkVisibility()
+      : el.offsetParent !== null;
+  }
+
   extractText(container) {
     if (this.hostname.includes('claude.ai')) {
       const pElement = container.querySelector('p.whitespace-pre-wrap');
@@ -259,7 +268,8 @@ class ChatSiteAdapter {
   // 현재 채팅 페이지에 있는지 확인
   isOnChatPage() {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return !!document.querySelector('[data-user-message-bubble="true"]');
+      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'))
+        .some(el => this.isElementVisible(el));
     } else if (this.hostname.includes('claude.ai')) {
       return !!document.querySelector('[data-testid="user-message"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
