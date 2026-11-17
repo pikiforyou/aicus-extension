@@ -558,6 +558,11 @@ class AicusNavigator {
     this.container = null;
     this.observer = null;
     this.questions = [];
+
+    // 가상화 사이트(Claude, ChatGPT)용 누적 목록: data-turn-key → { key, text, y, element }
+    this.questionMap = new Map();
+    this.questionMapUrl = window.location.href;
+    this.scroller = null;
     this.previewTooltip = null;
     this.donationModal = null;
 
@@ -615,8 +620,21 @@ class AicusNavigator {
     this.observer.start();
   }
 
-  scanForQuestions() { 
+  scanForQuestions() {
     let userMessages = this.adapter.getUserMessages();
+
+    // 다른 대화로 이동했으면 누적 목록 초기화 (URL 폴링 2초를 기다리지 않고 스캔 시점에 바로 판정)
+    if (window.location.href !== this.questionMapUrl) {
+      this.questionMap.clear();
+      this.questionMapUrl = window.location.href;
+      this.scroller = null;
+    }
+
+    // 안정적인 키(data-turn-key)가 있는 사이트는 화면 밖으로 빠진 질문도 유지하도록 누적
+    if (this.questionMap.size > 0 || userMessages.some(el => this.getTurnKey(el))) {
+      this.mergeKeyedQuestions(userMessages);
+      return;
+    }
 
     // 위→아래 정렬
     userMessages.sort((a, b) => {
@@ -651,6 +669,69 @@ class AicusNavigator {
     this.updateQuestionsList();
     
     console.log(`🧭 Found ${questions.length} valid questions`);
+  }
+
+  getTurnKey(el) {
+    const row = el.closest('[data-turn-key]');
+    return row ? row.getAttribute('data-turn-key') : null;
+  }
+
+  // 질문 요소를 감싸는 스크롤 컨테이너 (overflow auto/scroll 인 첫 조상)
+  findScroller(el) {
+    if (this.scroller && this.scroller.isConnected && this.scroller.contains(el)) {
+      return this.scroller;
+    }
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      const overflowY = getComputedStyle(node).overflowY;
+      if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 50) {
+        this.scroller = node;
+        return node;
+      }
+      node = node.parentElement;
+    }
+    this.scroller = document.scrollingElement;
+    return this.scroller;
+  }
+
+  // 스크롤 컨테이너 기준 위치 (스크롤해도 변하지 않는 값)
+  getScrollY(el, scroller) {
+    const top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+    return Math.round(el.getBoundingClientRect().top - top + scroller.scrollTop);
+  }
+
+  mergeKeyedQuestions(userMessages) {
+    const renderedKeys = new Set();
+    let scroller = this.scroller;
+
+    userMessages.forEach(el => {
+      const key = this.getTurnKey(el);
+      if (!key) return;
+      const text = this.adapter.extractText(el);
+      if (!text || !this.isValidQuestion(text)) return;
+
+      scroller = this.findScroller(el);
+      renderedKeys.add(key);
+      this.questionMap.set(key, { key, text, y: this.getScrollY(el, scroller), element: el });
+    });
+
+    // 화면에 보이는 구간 안에 있어야 할 질문이 DOM에 없으면 삭제/수정된 것으로 보고 제거
+    if (scroller) {
+      const viewTop = scroller.scrollTop + 20;
+      const viewBottom = scroller.scrollTop + scroller.clientHeight - 20;
+      for (const [key, q] of this.questionMap) {
+        if (!renderedKeys.has(key) && q.y > viewTop && q.y < viewBottom) {
+          this.questionMap.delete(key);
+        }
+      }
+    }
+
+    this.questions = Array.from(this.questionMap.values())
+      .sort((a, b) => a.y - b.y)
+      .map((q, i) => ({ ...q, fullText: q.text, index: i + 1 }));
+    this.updateQuestionsList();
+
+    console.log(`🧭 Found ${this.questions.length} valid questions (rendered ${renderedKeys.size})`);
   }
 
   // 질문 유효성 검사
@@ -701,8 +782,8 @@ class AicusNavigator {
       item.addEventListener('click', () => {
         const index = parseInt(item.dataset.index);
         const question = this.questions.find(q => q.index === index);
-        if (question && question.element) {
-          this.scrollToQuestion(question.element);
+        if (question) {
+          this.scrollToQuestion(question);
         }
       });
 
@@ -1322,9 +1403,54 @@ class AicusNavigator {
     this.previewTooltip.style.top = top + 'px';
   }
 
-  scrollToQuestion(element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    this.highlightElement(element);
+  scrollToQuestion(question) {
+    // 키가 없는 사이트(Gemini 등): 기존 방식
+    if (!question.key) {
+      if (question.element) {
+        question.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        this.highlightElement(question.element);
+      }
+      return;
+    }
+
+    const findLive = () => this.adapter.getUserMessages().find(el => this.getTurnKey(el) === question.key);
+
+    const scrollAndSettle = (el) => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      this.highlightElement(el);
+      // 스크롤 중 위쪽 질문이 다시 렌더되며 높이가 바뀌면 목표에서 벗어날 수 있어 한 번 보정
+      setTimeout(() => {
+        const live = findLive();
+        if (!live) return;
+        const rect = live.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > window.innerHeight) {
+          live.scrollIntoView({ behavior: 'auto', block: 'center' });
+          this.highlightElement(live);
+        }
+      }, 700);
+    };
+
+    const live = findLive();
+    if (live) {
+      scrollAndSettle(live);
+      return;
+    }
+
+    // DOM에서 빠진 질문: 저장된 위치로 먼저 이동해 렌더시킨 뒤 다시 찾기
+    const scroller = this.scroller;
+    if (!scroller || !scroller.isConnected) return;
+    scroller.scrollTop = Math.max(0, question.y - scroller.clientHeight / 2);
+
+    let tries = 0;
+    const retry = () => {
+      const el = findLive();
+      if (el) {
+        scrollAndSettle(el);
+      } else if (++tries < 3) {
+        setTimeout(retry, 300);
+      }
+    };
+    setTimeout(retry, 300);
   }
 
   highlightElement(element) {
