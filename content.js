@@ -408,31 +408,21 @@ class OptimizedObserver {
       });
     };
     
+    // 다시 호출되더라도 타이머가 쌓이지 않도록 기존 타이머 해제
+    clearTimeout(this.iframeInitTimer);
+    clearInterval(this.iframeCheckTimer);
+
     // 초기 iframe 검사
-    setTimeout(watchIframes, 1000);
-    
+    this.iframeInitTimer = setTimeout(watchIframes, 1000);
+
     // 주기적으로 새로운 iframe 확인
     this.iframeCheckTimer = setInterval(watchIframes, 5000);
   }
 
   setupUrlWatcher() {
-    // History API 감지
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-    
-    this.originalPushState = originalPushState;
-    this.originalReplaceState = originalReplaceState;
-    
-    history.pushState = (...args) => {
-      originalPushState.apply(history, args);
-      this.onUrlChange();
-    };
-    
-    history.replaceState = (...args) => {
-      originalReplaceState.apply(history, args);
-      this.onUrlChange();
-    };
-    
+    // content script는 isolated world에서 실행되므로 history.pushState를 덮어써도
+    // 페이지(SPA)의 호출을 가로챌 수 없다 → popstate + URL 폴링으로 감지
+
     // popstate 이벤트
     this.popstateHandler = () => this.onUrlChange();
     window.addEventListener('popstate', this.popstateHandler);
@@ -446,14 +436,6 @@ class OptimizedObserver {
   }
 
   cleanupUrlWatcher() {
-    // History API 복원
-    if (this.originalPushState) {
-      history.pushState = this.originalPushState;
-    }
-    if (this.originalReplaceState) {
-      history.replaceState = this.originalReplaceState;
-    }
-    
     // 이벤트 리스너 제거
     if (this.popstateHandler) {
       window.removeEventListener('popstate', this.popstateHandler);
@@ -469,6 +451,9 @@ class OptimizedObserver {
       clearInterval(this.iframeCheckTimer);
       this.iframeCheckTimer = null;
     }
+
+    clearTimeout(this.iframeInitTimer);
+    clearTimeout(this.urlScanTimer);
   }
 
   onUrlChange() {
@@ -478,10 +463,10 @@ class OptimizedObserver {
       this.lastUrl = newUrl;
       
       // URL 변경 시 잠시 후 스캔 (DOM 로딩 대기)
-      setTimeout(() => {
+      // iframe 감시는 start()에서 설정한 5초 인터벌이 계속 처리하므로 다시 설정하지 않는다
+      clearTimeout(this.urlScanTimer);
+      this.urlScanTimer = setTimeout(() => {
         this.forceScan();
-        // iframe 재검사
-        this.setupIframeWatchers();
       }, 500);
     }
   }
