@@ -6,7 +6,7 @@ class ChatSiteAdapter {
 
   getUserMessages() {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
+      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'));
     } else if (this.hostname.includes('claude.ai')) {
       return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
@@ -200,8 +200,8 @@ class ChatSiteAdapter {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
     
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return node.matches('[data-message-author-role="user"]') ||
-             node.querySelector('[data-message-author-role="user"]') ||
+      return node.matches('[data-user-message-bubble="true"]') ||
+             node.querySelector('[data-user-message-bubble="true"]') ||
              node.matches('[data-testid*="conversation"]') ||
              node.closest('[data-testid*="conversation"]');
     } else if (this.hostname.includes('claude.ai')) {
@@ -259,7 +259,7 @@ class ChatSiteAdapter {
   // 현재 채팅 페이지에 있는지 확인
   isOnChatPage() {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return !!document.querySelector('[data-message-author-role]');
+      return !!document.querySelector('[data-user-message-bubble="true"]');
     } else if (this.hostname.includes('claude.ai')) {
       return !!document.querySelector('[data-testid="user-message"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
