@@ -1465,6 +1465,11 @@ class AicusNavigator {
       setTimeout(() => {
         const live = findLive();
         if (!live) return;
+        // 스크롤이 끝난 뒤의 정확한 위치로 저장값 갱신 (다음 점프가 정확해지도록)
+        const stored = this.questionMap.get(question.key);
+        if (stored) {
+          stored.y = this.getScrollY(live, this.findScroller(live));
+        }
         const rect = live.getBoundingClientRect();
         if (rect.top < 0 || rect.bottom > window.innerHeight) {
           live.scrollIntoView({ behavior: 'auto', block: 'center' });
@@ -1492,6 +1497,10 @@ class AicusNavigator {
       scroller.scrollTop = Math.max(0, question.y - scroller.clientHeight / 2);
     }
 
+    // 대화 전체를 한쪽 끝에서 반대쪽 끝까지 훑을 수 있는 횟수 (긴 답변이 많아도 중간에 멈추지 않도록)
+    const stepSize = scroller.clientHeight * 0.8;
+    const maxTries = Math.ceil(scroller.scrollHeight / stepSize) + 5;
+
     let tries = 0;
     const step = () => {
       const el = findLive();
@@ -1499,7 +1508,7 @@ class AicusNavigator {
         scrollAndSettle(el);
         return;
       }
-      if (++tries > 15) return;
+      if (++tries > maxTries) return;
 
       // 렌더된 질문 중 목록에서 가장 앞선 것 기준으로 방향 결정
       // (Claude는 마지막 질문을 항상 렌더해 두므로 최댓값이 아니라 최솟값을 기준으로 삼는다)
@@ -1508,7 +1517,7 @@ class AicusNavigator {
         .filter(i => i >= 0);
       const minIdx = renderedIdx.length ? Math.min(...renderedIdx) : -1;
       const dir = minIdx === -1 || targetIdx < minIdx ? -1 : 1;
-      scroller.scrollTop += dir * scroller.clientHeight * 0.8;
+      scroller.scrollTop += dir * stepSize;
       setTimeout(step, 250);
     };
     setTimeout(step, 250);
