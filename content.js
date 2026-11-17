@@ -717,6 +717,9 @@ class AicusNavigator {
   }
 
   createShadowDOM() {
+    // 이전 인스턴스나 다른 Aicus 빌드가 남긴 패널 제거
+    document.querySelectorAll('#aicus-navigator').forEach(el => el.remove());
+
     this.container = document.createElement('div');
     this.container.id = 'aicus-navigator';
     this.container.style.cssText = `
@@ -1634,24 +1637,29 @@ createDonationModal() {
 }
 
 // 확장 프로그램 초기화
-let aicusNavigator = null;
+(() => {
+  // all_frames: true 이므로 iframe 안에서는 패널을 만들지 않는다
+  if (window.top !== window) return;
 
-function initAicus() {
-  if (aicusNavigator) {
-    aicusNavigator.destroy();
+  let aicusNavigator = null;
+
+  function initAicus() {
+    if (aicusNavigator) {
+      aicusNavigator.destroy();
+    }
+    aicusNavigator = new AicusNavigator();
+    console.log('🧭 Aicus initialized');
   }
-  aicusNavigator = new AicusNavigator();
-  console.log('🧭 Aicus initialized');
-}
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initAicus);
-} else {
-  initAicus();
-}
-
-window.addEventListener('beforeunload', () => {
-  if (aicusNavigator) {
-    aicusNavigator.destroy();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAicus);
+  } else {
+    initAicus();
   }
-});
+
+  window.addEventListener('beforeunload', () => {
+    if (aicusNavigator) {
+      aicusNavigator.destroy();
+    }
+  });
+})();
