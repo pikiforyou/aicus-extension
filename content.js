@@ -1854,24 +1854,24 @@ class AicusNavigator {
 
     const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
 
-    // 1) 맨 위로: 맨 위 첫 턴과 전체 높이가 두 번 연속 같을 때만 맨 위로 인정 (최대 약 10초)
-    //    (위치값은 Claude가 높이를 다시 재는 동안 믿을 수 없어 턴 키로 판정 — 실측)
+    // 1) 맨 위로: Claude는 맨 위에 닿으면 이전 메시지를 서버에서 더 받아와 위에 붙임
+    //    (실측: 높이 14565→30432, 같은 만큼 위치도 밀림 = 위쪽에 내용 추가 + 스크롤 위치 유지)
+    //    → 맨 위에서 1초 동안 높이·위치 변화가 없을 때까지 다시 올라가며 기다림 (최대 20초)
     const goTop = async (pass) => {
       covered.clear();
-      let prevFirst = null;
-      let prevH = -1;
       const started = Date.now();
-      for (let i = 0; stillValid() && Date.now() - started < 10000; i++) {
+      while (stillValid() && Date.now() - started < 20000) {
         const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
         const settleMs = await settle(far);
-        const firstKey = turnKeys()[0] || null;
-        snapshot({ phase: 'top', pass, settleMs });
-        if (scroller.scrollTop <= 2 && firstKey && firstKey === prevFirst && scroller.scrollHeight === prevH) {
-          break;
+        const h0 = scroller.scrollHeight;
+        let grew = false;
+        for (let i = 0; i < 10 && stillValid(); i++) {
+          await wait(100);
+          if (scroller.scrollHeight !== h0 || scroller.scrollTop > 2) { grew = true; break; }
         }
-        prevFirst = firstKey;
-        prevH = scroller.scrollHeight;
+        snapshot({ phase: 'top', pass, settleMs, grew });
+        if (!grew) break;
       }
       if (stillValid()) collect();
       snapshot({ phase: 'topDone', pass });
@@ -1913,12 +1913,12 @@ class AicusNavigator {
     let passes = 0;
 
     try {
-      // 처음 여는 긴 대화는 첫 훑기 중 Claude가 답변 높이를 다시 재며 위치가 크게 튐(실측: 높이 17560→42247).
-      // 이어지지 않은 구간이 남았으면 높이가 확정된 상태에서 한 번 더 훑음 (최대 2회)
-      for (passes = 1; passes <= 2 && stillValid(); passes++) {
+      // 통신이 느려 이전 메시지가 늦게 붙는 등 이어지지 않은 구간이 남으면 한 번 더 훑음 (최대 2회)
+      for (let pass = 1; pass <= 2 && stillValid(); pass++) {
+        passes = pass;
         this.setLoadProgress(0);
-        await goTop(passes);
-        complete = await walkDown(passes);
+        await goTop(pass);
+        complete = await walkDown(pass);
         if (complete) break;
       }
       if (AICUS_DEBUG) {
