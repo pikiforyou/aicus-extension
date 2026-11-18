@@ -1645,7 +1645,7 @@ class AicusNavigator {
     } else if (this.loadCancelledUrl === url) {
       message = `중단됨 · ${count}개까지 불러옴`;
     } else {
-      message = '이 사이트는 화면에 나온 질문만 보여요 · 전체 불러오기';
+      message = '전체 질문을 보려면 눌러주세요';
     }
 
     const wasHidden = box.hidden;
