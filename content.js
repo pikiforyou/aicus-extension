@@ -592,6 +592,7 @@ class AicusNavigator {
     this.conversationCache = new Map();
     // 전체 불러오기를 끝까지 마친 대화 / 중간에 멈춘 대화 (안내줄 표시용, 메모리만)
     this.fullyLoadedUrls = new Set();
+    this.missingTurnsUrls = new Set();
     this.loadCancelledUrl = null;
     this.scroller = null;
     this.previewTooltip = null;
@@ -1655,25 +1656,15 @@ class AicusNavigator {
     scroller.scrollTo({ top, behavior: 'instant' });
   }
 
-  // 화면 밖으로 빠진 턴이 있는지: 그려진 턴 사이/위/아래에 큰 빈 공간이 있으면 빠진 것
-  // 실측(Claude): 전부 그려진 대화의 맨 위 여백 81px, 가상화된 대화 7433~13172px,
-  //              아래 여백은 입력창 영역으로 항상 약 227px, 턴 사이 간격 최대 25px
-  hasUnrenderedTurns() {
-    const turns = this.getRenderedTurns();
-    if (turns.length === 0) return false;
-    const scroller = this.findScroller(turns[0]);
+  // 위쪽 턴이 화면 밖으로 빠졌는지: 대화 영역 맨 위 ~ 첫 번째로 그려진 턴 사이 빈 공간으로 판정
+  // 실측(Claude): 전부 그려진 대화 81px, 가상화된 대화 7433~13172px
+  // 아래쪽 빈 공간은 쓰지 않음 (ChatGPT는 대화 끝에 큰 여백을 둬 오판하는 것으로 추정)
+  hasMissingTurnsAbove() {
+    const first = this.getRenderedTurns()[0];
+    if (!first) return false;
+    const scroller = this.findScroller(first);
     if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 50) return false;
-
-    const base = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
-    const spans = turns.map(t => {
-      const r = t.getBoundingClientRect();
-      return [r.top - base + scroller.scrollTop, r.bottom - base + scroller.scrollTop];
-    }).sort((a, b) => a[0] - b[0]);
-
-    const limit = scroller.clientHeight * 0.5;
-    if (spans[0][0] > limit) return true;
-    if (scroller.scrollHeight - spans[spans.length - 1][1] > scroller.clientHeight) return true;
-    return spans.some((s, i) => i > 0 && s[0] - spans[i - 1][1] > limit);
+    return this.getScrollY(first, scroller) > scroller.clientHeight * 0.5;
   }
 
   // 목록 위 안내줄: 불러오는 중 / 중단됨 / 아직 안 불러옴 / (다 불러왔으면 숨김)
@@ -1688,7 +1679,7 @@ class AicusNavigator {
     let after = '';
     if (this.isLoadingAll) {
       message = `전체 질문 불러오는 중… ${count}개 찾음 · 스크롤하면 중단`;
-    } else if (!this.isKeyedMode() || this.fullyLoadedUrls.has(url) || !this.hasUnrenderedTurns()) {
+    } else if (!this.isKeyedMode() || this.fullyLoadedUrls.has(url) || !this.isMissingTurnsSeen(url)) {
       message = null;
     } else if (this.loadCancelledUrl === url) {
       message = `중단됨 · ${count}개 · 다시 하려면`;
@@ -1709,6 +1700,17 @@ class AicusNavigator {
     if (wasHidden !== box.hidden) {
       this.checkScrollNeed();
     }
+  }
+
+  // 한 번이라도 위쪽 턴이 빠진 것을 본 대화는 전체 불러오기 전까지 안내 유지
+  // (스크롤 위치마다 판정이 바뀌어 안내가 떴다 사라졌다 하지 않도록)
+  isMissingTurnsSeen(url) {
+    if (this.missingTurnsUrls.has(url)) return true;
+    if (this.hasMissingTurnsAbove()) {
+      this.missingTurnsUrls.add(url);
+      return true;
+    }
+    return false;
   }
 
   setLoadProgress(ratio) {
