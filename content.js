@@ -1523,7 +1523,7 @@ class AicusNavigator {
       let stable = 0;
       for (let i = 0; i < 40 && stillValid(); i++) {
         this.jumpScroll(scroller, 0);
-        await wait(250);
+        await wait(150);
         this.mergeKeyedQuestions(this.adapter.getUserMessages());
         if (scroller.scrollTop <= 2 && scroller.scrollHeight === lastHeight) {
           if (++stable >= 2) break;
@@ -1534,13 +1534,14 @@ class AicusNavigator {
       }
 
       // 2) 한 화면씩 아래로: 높이가 바뀌어도 실제 끝에 닿거나 더 내려가지 않을 때까지
-      const stepSize = scroller.clientHeight * 0.8;
+      // 대기가 너무 짧으면 렌더되기 전에 지나가 질문이 빠질 수 있음 → 개수 확인하며 조정
+      const stepSize = scroller.clientHeight * 0.9;
       for (let i = 0; i < 1000 && stillValid(); i++) {
         this.mergeKeyedQuestions(this.adapter.getUserMessages());
         if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) break;
         const before = scroller.scrollTop;
         this.jumpScroll(scroller, before + stepSize);
-        await wait(250);
+        await wait(120);
         if (Math.abs(scroller.scrollTop - before) < 1) break;
       }
       if (stillValid()) {
