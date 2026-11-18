@@ -710,8 +710,9 @@ class AicusNavigator {
       }
       node = node.parentElement;
     }
-    this.scroller = document.scrollingElement;
-    return this.scroller;
+    // 대화가 아직 로딩 중이라 스크롤 영역이 없을 수 있음 → 페이지 전체를 임시로 쓰되 기억하지 않음
+    // (기억하면 이후 스크롤 영역이 생겨도 계속 페이지 전체를 스크롤해 불러오기가 바로 끝나 버림)
+    return document.scrollingElement;
   }
 
   // 스크롤 컨테이너 기준 위치 (스크롤해도 변하지 않는 값)
@@ -1672,7 +1673,8 @@ class AicusNavigator {
     const first = this.adapter.getUserMessages()[0];
     if (!first) return;
     const scroller = this.findScroller(first);
-    if (!scroller) return;
+    // 스크롤할 대화 영역이 없으면(로딩 중 등) 시작하지 않음 → "다 불러옴"으로 잘못 처리되지 않도록
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 50) return;
 
     this.isLoadingAll = true;
     const btn = this.shadowRoot.querySelector('.load-all-btn');
