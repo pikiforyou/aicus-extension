@@ -1096,7 +1096,7 @@ class AicusNavigator {
       }
 
       .load-status-btn {
-        border: 1px solid currentColor;
+        border: 1px solid rgba(0, 0, 0, 0.12);
         background: none;
         border-radius: 4px;
         cursor: pointer;
@@ -1107,6 +1107,10 @@ class AicusNavigator {
 
       .load-status-btn:hover {
         background: rgba(0, 0, 0, 0.1);
+      }
+
+      .dark .load-status-btn {
+        border-color: rgba(255, 255, 255, 0.18);
       }
 
       .dark .load-status-btn:hover {
