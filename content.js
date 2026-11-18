@@ -581,6 +581,9 @@ class AicusNavigator {
     this.questionMapUrl = window.location.href;
     // 같은 탭 안에서 대화별 누적 목록 기억 (메모리만 사용, 저장소 X, 새로고침하면 사라짐)
     this.conversationCache = new Map();
+    // 전체 불러오기를 끝까지 마친 대화 / 중간에 멈춘 대화 (안내줄 표시용, 메모리만)
+    this.fullyLoadedUrls = new Set();
+    this.loadCancelledUrl = null;
     this.scroller = null;
     this.previewTooltip = null;
     this.donationModal = null;
@@ -850,6 +853,7 @@ class AicusNavigator {
     if (loadAllBtn) {
       loadAllBtn.hidden = this.questionMap.size === 0;
     }
+    this.updateLoadStatus();
 
     if (this.questions.length === 0) {
       const isOnChat = this.adapter.isOnChatPage();
@@ -1020,8 +1024,79 @@ class AicusNavigator {
       }
 
       .header,
-      .settings-panel {
+      .settings-panel,
+      .load-status {
         flex-shrink: 0;
+      }
+
+      /* 전체 불러오기 안내/진행 표시 (패널 안에서만 표시, 사이트 화면은 건드리지 않음) */
+      .load-status {
+        padding: 6px 12px 6px 16px;
+        font-size: 11px;
+        color: #666;
+        background: var(--settings-bg);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .dark .load-status {
+        color: #aaa;
+        background: var(--settings-bg-dark);
+        border-bottom-color: var(--border-color-dark);
+      }
+
+      .load-status[hidden],
+      .load-status-btn[hidden],
+      .load-progress[hidden],
+      .navigator.minimized .load-status,
+      .navigator.collapsed .load-status {
+        display: none;
+      }
+
+      .load-status-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .load-status-text {
+        flex: 1;
+      }
+
+      .load-status-btn {
+        border: none;
+        background: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 2px 6px;
+        color: inherit;
+      }
+
+      .load-status-btn:hover {
+        background: rgba(0, 0, 0, 0.1);
+      }
+
+      .dark .load-status-btn:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      .load-progress {
+        height: 3px;
+        margin-top: 5px;
+        border-radius: 2px;
+        background: rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+      }
+
+      .dark .load-progress {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .load-progress-bar {
+        height: 100%;
+        width: 0;
+        background: var(--accent-color, #BCBAE6);
+        transition: width 0.15s linear;
       }
 
       /* 목록 영역은 패널 높이에서 헤더/설정을 뺀 나머지를 채움 */
@@ -1342,6 +1417,13 @@ class AicusNavigator {
           <span class="coffee-text">개발자에게 커피 한잔 사주기!</span>
         </div>
       </div>
+      <div class="load-status" hidden>
+        <div class="load-status-row">
+          <span class="load-status-text"></span>
+          <button class="load-status-btn" title="전체 질문 불러오기">⇅</button>
+        </div>
+        <div class="load-progress" hidden><div class="load-progress-bar"></div></div>
+      </div>
       <div class="content">
         <div class="empty-state">질문을 찾는 중...</div>
       </div>
@@ -1500,6 +1582,10 @@ class AicusNavigator {
       e.stopPropagation();
       this.loadAllQuestions();
     });
+    this.shadowRoot.querySelector('.load-status-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.loadAllQuestions();
+    });
     closeBtn.addEventListener('click', () => this.hide());
   }
 
@@ -1536,6 +1622,49 @@ class AicusNavigator {
     scroller.scrollTo({ top, behavior: 'instant' });
   }
 
+  // 대화 영역이 스크롤될 만큼 긴지 (짧은 대화는 질문이 전부 렌더되므로 안내 불필요)
+  isConversationScrollable() {
+    const first = this.adapter.getUserMessages()[0];
+    if (!first) return false;
+    const scroller = this.findScroller(first);
+    return !!scroller && scroller.scrollHeight > scroller.clientHeight + 50;
+  }
+
+  // 목록 위 안내줄: 불러오는 중 / 중단됨 / 아직 안 불러옴 / (다 불러왔으면 숨김)
+  updateLoadStatus() {
+    const box = this.shadowRoot.querySelector('.load-status');
+    if (!box) return;
+    const url = window.location.href;
+    const count = this.questions.length;
+
+    let message = null;
+    if (this.isLoadingAll) {
+      message = `전체 질문 불러오는 중… ${count}개 찾음 · 스크롤하면 중단`;
+    } else if (this.questionMap.size === 0 || this.fullyLoadedUrls.has(url) || !this.isConversationScrollable()) {
+      message = null;
+    } else if (this.loadCancelledUrl === url) {
+      message = `중단됨 · ${count}개까지 불러옴`;
+    } else {
+      message = '이 사이트는 화면에 나온 질문만 보여요 · 전체 불러오기';
+    }
+
+    const wasHidden = box.hidden;
+    box.hidden = !message;
+    if (message) {
+      box.querySelector('.load-status-text').textContent = message;
+      box.querySelector('.load-status-btn').hidden = this.isLoadingAll;
+      box.querySelector('.load-progress').hidden = !this.isLoadingAll;
+    }
+    if (wasHidden !== box.hidden) {
+      this.checkScrollNeed();
+    }
+  }
+
+  setLoadProgress(ratio) {
+    const bar = this.shadowRoot.querySelector('.load-progress-bar');
+    if (bar) bar.style.width = Math.round(Math.min(1, Math.max(0, ratio)) * 100) + '%';
+  }
+
   // 대화를 맨 위부터 한 화면씩 훑어 화면 밖 질문까지 모은 뒤 원래 위치로 복귀
   // 사용자가 휠/터치/키 입력을 하면 즉시 중단
   async loadAllQuestions() {
@@ -1548,6 +1677,8 @@ class AicusNavigator {
     this.isLoadingAll = true;
     const btn = this.shadowRoot.querySelector('.load-all-btn');
     btn.disabled = true;
+    this.setLoadProgress(0);
+    this.updateLoadStatus();
 
     const startUrl = window.location.href;
     const originalTop = scroller.scrollTop;
@@ -1586,10 +1717,15 @@ class AicusNavigator {
         const before = scroller.scrollTop;
         this.jumpScroll(scroller, before + stepSize);
         await wait(120);
+        this.setLoadProgress((scroller.scrollTop + scroller.clientHeight) / scroller.scrollHeight);
         if (Math.abs(scroller.scrollTop - before) < 1) break;
       }
       if (stillValid()) {
         this.mergeKeyedQuestions(this.adapter.getUserMessages());
+        this.fullyLoadedUrls.add(startUrl);
+        this.loadCancelledUrl = null;
+      } else if (cancelled) {
+        this.loadCancelledUrl = startUrl;
       }
     } finally {
       window.removeEventListener('wheel', cancel, { capture: true });
@@ -1600,6 +1736,7 @@ class AicusNavigator {
       }
       btn.disabled = false;
       this.isLoadingAll = false;
+      this.updateLoadStatus();
     }
   }
 
