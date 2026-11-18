@@ -874,6 +874,8 @@ class AicusNavigator {
       .navigator {
         width: 320px;
         max-height: 80vh;
+        display: flex;
+        flex-direction: column;
         background: #ffffff;
         border: 1px solid #e5e5e5;
         border-radius: 12px;
@@ -973,8 +975,15 @@ class AicusNavigator {
         cursor: pointer !important;
       }
 
+      .header,
+      .settings-panel {
+        flex-shrink: 0;
+      }
+
+      /* 목록 영역은 패널 높이에서 헤더/설정을 뺀 나머지를 채움 */
       .content {
-        max-height: 300px;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: hidden;
         padding: 8px 0;
       }
@@ -983,8 +992,17 @@ class AicusNavigator {
         overflow-y: auto;
       }
 
-      .navigator.show-settings .content {
+      /* 리사이즈 전 기본 크기 (리사이즈 후에는 패널 height만 사용) */
+      .navigator:not(.resized) .content {
+        max-height: 300px;
+      }
+
+      .navigator:not(.resized).show-settings .content {
         max-height: 250px;
+      }
+
+      .navigator.collapsed {
+        height: auto !important;
       }
 
       .navigator.collapsed .content {
@@ -1380,8 +1398,9 @@ class AicusNavigator {
       const deltaY = e.clientY - startY;
       const newWidth = Math.max(250, Math.min(500, startWidth + deltaX));
       const newHeight = Math.max(200, Math.min(window.innerHeight * 0.8, startHeight + deltaY));
+      navigator.classList.add('resized');
       navigator.style.width = newWidth + 'px';
-      navigator.style.maxHeight = newHeight + 'px';
+      navigator.style.height = newHeight + 'px';
       this.updateContentHeight();
     };
 
@@ -1660,7 +1679,7 @@ class AicusNavigator {
     if (this.isMinimized) {
       this.savedStyles = {
         width: navigator.style.width,
-        maxHeight: navigator.style.maxHeight
+        height: navigator.style.height
       };
       navigator.classList.add('minimized');
       this.container.style.width = '60px';
@@ -1680,7 +1699,7 @@ class AicusNavigator {
       this.container.style.left = 'auto';
       if (this.savedStyles) {
         navigator.style.width = this.savedStyles.width || '320px';
-        navigator.style.maxHeight = this.savedStyles.maxHeight || '80vh';
+        navigator.style.height = this.savedStyles.height || '';
         setTimeout(() => this.updateContentHeight(), 0);
       }
     }
@@ -1697,20 +1716,8 @@ class AicusNavigator {
     setTimeout(() => this.updateContentHeight(), 0);
   }
 
+  // 목록 높이는 CSS(flex)가 정하므로 여기서는 스크롤 필요 여부만 다시 판정
   updateContentHeight() {
-    const navigator = this.shadowRoot.querySelector('.navigator');
-    const content = this.shadowRoot.querySelector('.content');
-    const header = this.shadowRoot.querySelector('.header');
-    const settingsPanel = this.shadowRoot.querySelector('.settings-panel');
-    if (!navigator || !content || !header) return;
-    const navigatorMaxHeight = parseInt(navigator.style.maxHeight) || parseInt(getComputedStyle(navigator).maxHeight) || 500;
-    const headerHeight = header.offsetHeight;
-    const settingsHeight = this.showSettings && settingsPanel ? settingsPanel.offsetHeight : 0;
-    const resizeHandleHeight = 16;
-    const padding = 20;
-    const availableHeight = navigatorMaxHeight - headerHeight - settingsHeight - resizeHandleHeight - padding;
-    const finalHeight = Math.max(100, availableHeight);
-    content.style.maxHeight = finalHeight + 'px';
     this.checkScrollNeed();
   }
 
@@ -1718,9 +1725,7 @@ class AicusNavigator {
     const content = this.shadowRoot.querySelector('.content');
     if (!content) return;
     setTimeout(() => {
-      const contentHeight = content.scrollHeight;
-      const maxHeight = parseInt(content.style.maxHeight) || 300;
-      if (contentHeight > maxHeight) {
+      if (content.scrollHeight > content.clientHeight + 1) {
         content.classList.add('scrollable');
       } else {
         content.classList.remove('scrollable');
