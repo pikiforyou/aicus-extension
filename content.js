@@ -566,6 +566,8 @@ class AicusNavigator {
     this.questionMap = new Map();
     this.questionOrder = [];
     this.questionMapUrl = window.location.href;
+    // 같은 탭 안에서 대화별 누적 목록 기억 (메모리만 사용, 저장소 X, 새로고침하면 사라짐)
+    this.conversationCache = new Map();
     this.scroller = null;
     this.previewTooltip = null;
     this.donationModal = null;
@@ -703,10 +705,27 @@ class AicusNavigator {
 
   resetIfUrlChanged() {
     if (window.location.href !== this.questionMapUrl) {
-      this.questionMap.clear();
-      this.questionOrder = [];
+      this.saveConversationCache();
+      const cached = this.conversationCache.get(window.location.href);
+      this.questionMap = cached ? new Map(cached.map) : new Map();
+      this.questionOrder = cached ? [...cached.order] : [];
       this.questionMapUrl = window.location.href;
       this.scroller = null;
+      return true;
+    }
+    return false;
+  }
+
+  // 떠나는 대화의 목록을 기억 (DOM 요소 참조는 버려 메모리에 붙잡아 두지 않음, 최근 20개까지)
+  saveConversationCache() {
+    const url = this.questionMapUrl;
+    this.conversationCache.delete(url);
+    if (this.questionMap.size === 0) return;
+    const map = new Map();
+    this.questionMap.forEach((q, key) => map.set(key, { ...q, element: null }));
+    this.conversationCache.set(url, { map, order: [...this.questionOrder] });
+    while (this.conversationCache.size > 20) {
+      this.conversationCache.delete(this.conversationCache.keys().next().value);
     }
   }
 
@@ -760,10 +779,11 @@ class AicusNavigator {
 
   // 변화가 감지될 때마다 즉시 호출: 잠깐만 렌더되고 빠지는 질문도 놓치지 않도록 키와 텍스트만 기록
   captureRendered() {
-    this.resetIfUrlChanged();
+    const urlChanged = this.resetIfUrlChanged();
     const userMessages = this.adapter.getUserMessages();
     if (this.questionMap.size === 0 && !userMessages.some(el => this.getTurnKey(el))) return;
-    if (this.mergeRendered(userMessages, false)) {
+    // 기억해 둔 대화로 돌아온 경우 새 질문이 없어도 목록을 바로 교체
+    if (this.mergeRendered(userMessages, false) || urlChanged) {
       this.buildKeyedQuestions();
       this.updateQuestionsList();
     }
