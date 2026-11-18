@@ -439,7 +439,13 @@ class OptimizedObserver {
     // popstate 이벤트
     this.popstateHandler = () => this.onUrlChange();
     window.addEventListener('popstate', this.popstateHandler);
-    
+
+    // Navigation API: 페이지의 pushState도 isolated world에서 즉시 감지됨 (실측 확인)
+    if (window.navigation) {
+      this.navigationHandler = () => this.onUrlChange();
+      window.navigation.addEventListener('currententrychange', this.navigationHandler);
+    }
+
     // URL 변화 주기적 체크 (fallback - 가벼운 체크)
     this.urlCheckTimer = setInterval(() => {
       if (window.location.href !== this.lastUrl) {
@@ -452,6 +458,9 @@ class OptimizedObserver {
     // 이벤트 리스너 제거
     if (this.popstateHandler) {
       window.removeEventListener('popstate', this.popstateHandler);
+    }
+    if (this.navigationHandler && window.navigation) {
+      window.navigation.removeEventListener('currententrychange', this.navigationHandler);
     }
     
     // 타이머 정리
@@ -474,7 +483,11 @@ class OptimizedObserver {
     if (newUrl !== this.lastUrl) {
       console.log('🧭 URL changed, scanning in 500ms');
       this.lastUrl = newUrl;
-      
+      // 이전 대화 목록을 즉시 비우거나 기억해 둔 목록으로 교체 (DOM 로딩을 기다리지 않음)
+      if (this.onUrlChanged) {
+        this.onUrlChanged();
+      }
+
       // URL 변경 시 잠시 후 스캔 (DOM 로딩 대기)
       // iframe 감시는 start()에서 설정한 5초 인터벌이 계속 처리하므로 다시 설정하지 않는다
       clearTimeout(this.urlScanTimer);
@@ -624,6 +637,7 @@ class AicusNavigator {
       this.adapter
     );
     this.observer.onRelevantMutation = () => this.captureRendered();
+    this.observer.onUrlChanged = () => this.showListForCurrentUrl();
     this.observer.start();
   }
 
@@ -714,6 +728,16 @@ class AicusNavigator {
       return true;
     }
     return false;
+  }
+
+  // URL이 바뀐 순간: 누적 목록 사이트는 DOM을 읽지 않고 바로 비우거나 기억해 둔 목록을 표시
+  // (ChatGPT는 이전 대화 질문을 숨긴 채 DOM에 남겨 두므로 이 시점에 DOM을 읽으면 섞일 수 있음)
+  showListForCurrentUrl() {
+    const wasKeyed = this.questionMap.size > 0;
+    if (!this.resetIfUrlChanged()) return;
+    if (!wasKeyed && this.questionMap.size === 0) return; // Gemini 등은 기존 스캔에 맡김
+    this.buildKeyedQuestions();
+    this.updateQuestionsList();
   }
 
   // 떠나는 대화의 목록을 기억 (DOM 요소 참조는 버려 메모리에 붙잡아 두지 않음, 최근 20개까지)
