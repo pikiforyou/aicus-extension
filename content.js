@@ -1648,12 +1648,25 @@ class AicusNavigator {
     scroller.scrollTo({ top, behavior: 'instant' });
   }
 
-  // 대화 영역이 스크롤될 만큼 긴지 (짧은 대화는 질문이 전부 렌더되므로 안내 불필요)
-  isConversationScrollable() {
-    const first = this.getAnchorElement();
-    if (!first) return false;
-    const scroller = this.findScroller(first);
-    return !!scroller && scroller.scrollHeight > scroller.clientHeight + 50;
+  // 화면 밖으로 빠진 턴이 있는지: 그려진 턴 사이/위/아래에 큰 빈 공간이 있으면 빠진 것
+  // 실측(Claude): 전부 그려진 대화의 맨 위 여백 81px, 가상화된 대화 7433~13172px,
+  //              아래 여백은 입력창 영역으로 항상 약 227px, 턴 사이 간격 최대 25px
+  hasUnrenderedTurns() {
+    const turns = this.getRenderedTurns();
+    if (turns.length === 0) return false;
+    const scroller = this.findScroller(turns[0]);
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 50) return false;
+
+    const base = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+    const spans = turns.map(t => {
+      const r = t.getBoundingClientRect();
+      return [r.top - base + scroller.scrollTop, r.bottom - base + scroller.scrollTop];
+    }).sort((a, b) => a[0] - b[0]);
+
+    const limit = scroller.clientHeight * 0.5;
+    if (spans[0][0] > limit) return true;
+    if (scroller.scrollHeight - spans[spans.length - 1][1] > scroller.clientHeight) return true;
+    return spans.some((s, i) => i > 0 && s[0] - spans[i - 1][1] > limit);
   }
 
   // 목록 위 안내줄: 불러오는 중 / 중단됨 / 아직 안 불러옴 / (다 불러왔으면 숨김)
@@ -1666,7 +1679,7 @@ class AicusNavigator {
     let message = null;
     if (this.isLoadingAll) {
       message = `전체 질문 불러오는 중… ${count}개 찾음 · 스크롤하면 중단`;
-    } else if (this.questionMap.size === 0 || this.fullyLoadedUrls.has(url) || !this.isConversationScrollable()) {
+    } else if (!this.isKeyedMode() || this.fullyLoadedUrls.has(url) || !this.hasUnrenderedTurns()) {
       message = null;
     } else if (this.loadCancelledUrl === url) {
       message = `중단됨 · ${count}개까지 불러옴`;
