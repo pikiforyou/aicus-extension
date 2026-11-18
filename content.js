@@ -207,6 +207,13 @@ class ChatSiteAdapter {
     return container.textContent?.trim() || '';
   }
 
+  // 대화 턴(질문 또는 답변) 자체가 그려지거나 빠졌는지: 긴 대화는 처음에 답변 턴만 그려지므로
+  // 질문뿐 아니라 턴 단위 변화에도 다시 스캔해야 함 (Claude/ChatGPT 실측 속성)
+  // 턴 "안쪽" 변화(답변 생성 중 글자 추가)는 포함하지 않음 → 스트리밍 중 스캔이 늘지 않음
+  isTurnNode(node) {
+    return node.matches('[data-turn-key]') || !!node.querySelector('[data-turn-key]');
+  }
+
   // 채팅 관련 노드인지 정밀하게 판단
   isRelevantChatNode(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
@@ -214,11 +221,13 @@ class ChatSiteAdapter {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
       return node.matches('[data-user-message-bubble="true"]') ||
              node.querySelector('[data-user-message-bubble="true"]') ||
+             this.isTurnNode(node) ||
              node.matches('[data-testid*="conversation"]') ||
              node.closest('[data-testid*="conversation"]');
     } else if (this.hostname.includes('claude.ai')) {
       return node.matches('[data-testid="user-message"]') ||
              node.querySelector('[data-testid="user-message"]') ||
+             this.isTurnNode(node) ||
              node.matches('[data-testid*="conversation"]') ||
              node.closest('[data-testid*="conversation"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
