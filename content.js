@@ -1743,46 +1743,96 @@ class AicusNavigator {
     const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
     const stillValid = () => !cancelled && window.location.href === startUrl;
 
-    try {
-      // 1) 맨 위로: 긴 대화는 맨 위에 닿을 때 이전 메시지를 더 불러오며 위치가 밀릴 수 있어(추정)
-      //    scrollTop이 0이고 전체 높이가 두 번 연속 그대로일 때까지 반복 (최대 약 10초)
-      let lastHeight = -1;
-      let stable = 0;
-      for (let i = 0; i < 40 && stillValid(); i++) {
-        this.jumpScroll(scroller, 0);
-        await wait(150);
-        this.mergeKeyedQuestions(this.adapter.getUserMessages());
-        if (scroller.scrollTop <= 2 && scroller.scrollHeight === lastHeight) {
-          if (++stable >= 2) break;
+    // 고정 시간만 기다리면 처음 여는 긴 대화처럼 그리기가 느릴 때 안 그려진 구간을 지나쳐 질문이 빠짐.
+    // 그래서 (a) 화면이 다 그려질 때까지 기다리고 (b) 이전 화면과 이어지는지 대화 턴 키로 확인한다.
+    const turnKeys = () => this.getRenderedTurns().map(t => t.getAttribute('data-turn-key'));
+    const covered = new Set(); // 지금까지 읽은 턴 키
+    const collect = () => {
+      this.mergeKeyedQuestions(this.adapter.getUserMessages());
+      turnKeys().forEach(k => covered.add(k));
+    };
+
+    // (a) 그려진 턴 목록·질문 수·전체 높이가 40ms 간격으로 두 번 연속 같으면 다 그려진 것으로 봄 (최대 약 1.5초)
+    const settle = async () => {
+      const signature = () =>
+        turnKeys().join(',') + '|' + this.adapter.getUserMessages().length + '|' + scroller.scrollHeight;
+      let prev = signature();
+      let same = 0;
+      for (let i = 0; i < 38 && stillValid(); i++) {
+        await wait(40);
+        const cur = signature();
+        if (cur === prev) {
+          if (++same >= 2) return;
         } else {
-          stable = 0;
+          same = 0;
+          prev = cur;
         }
-        lastHeight = scroller.scrollHeight;
+      }
+    };
+
+    // (b) 새 화면의 맨 위 턴을 이미 읽었으면 이전 화면과 이어진 것 (사이에 건너뛴 턴 없음)
+    const isContinuous = () => {
+      const keys = turnKeys();
+      return keys.length > 0 && covered.has(keys[0]);
+    };
+
+    const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+    let complete = false;
+
+    try {
+      // 1) 맨 위로: 첫 턴이 대화 영역 맨 위 근처에 그려지고 화면이 안정될 때까지 반복 (최대 약 10초)
+      const started = Date.now();
+      while (stillValid() && Date.now() - started < 10000) {
+        this.jumpScroll(scroller, 0);
+        await settle();
+        const first = this.getRenderedTurns()[0];
+        if (scroller.scrollTop <= 2 && first &&
+            this.getScrollY(first, scroller) < scroller.clientHeight * 0.5) {
+          break;
+        }
+      }
+      if (stillValid()) collect();
+
+      // 2) 아래로 훑기: 이어지지 않으면(건너뜀) 되돌아가 이동 폭을 절반씩 줄여 다시 시도
+      const fullStep = scroller.clientHeight * 0.9;
+      const minStep = scroller.clientHeight * 0.1;
+      let gapFound = false;
+      for (let i = 0; i < 2000 && stillValid() && !atBottom(); i++) {
+        const before = scroller.scrollTop;
+        let step = fullStep;
+        let continuous = false;
+        while (stillValid()) {
+          this.jumpScroll(scroller, before + step);
+          await settle();
+          if (isContinuous()) { continuous = true; break; }
+          // 그리기가 늦게 끝났을 수 있으니 한 번 더 기다려 확인
+          await wait(200);
+          if (isContinuous()) { continuous = true; break; }
+          if (step <= minStep) break;
+          step /= 2;
+        }
+        if (!stillValid()) break;
+        if (!continuous) gapFound = true;
+        collect();
+        this.setLoadProgress((scroller.scrollTop + scroller.clientHeight) / scroller.scrollHeight);
+        if (Math.abs(scroller.scrollTop - before) < 1) break; // 더 내려가지 않음
       }
 
-      // 2) 한 화면씩 아래로: 높이가 바뀌어도 실제 끝에 닿거나 더 내려가지 않을 때까지
-      // 대기가 너무 짧으면 렌더되기 전에 지나가 질문이 빠질 수 있음 → 개수 확인하며 조정
-      const stepSize = scroller.clientHeight * 0.9;
-      for (let i = 0; i < 1000 && stillValid(); i++) {
-        this.mergeKeyedQuestions(this.adapter.getUserMessages());
-        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) break;
-        const before = scroller.scrollTop;
-        this.jumpScroll(scroller, before + stepSize);
-        await wait(120);
-        this.setLoadProgress((scroller.scrollTop + scroller.clientHeight) / scroller.scrollHeight);
-        if (Math.abs(scroller.scrollTop - before) < 1) break;
-      }
       if (stillValid()) {
-        this.mergeKeyedQuestions(this.adapter.getUserMessages());
-        this.fullyLoadedUrls.add(startUrl);
-        this.loadCancelledUrl = null;
-      } else if (cancelled) {
-        this.loadCancelledUrl = startUrl;
+        collect();
+        complete = atBottom() && !gapFound;
       }
     } finally {
       window.removeEventListener('wheel', cancel, { capture: true });
       window.removeEventListener('touchstart', cancel, { capture: true });
       window.removeEventListener('keydown', cancel, true);
+      if (complete) {
+        this.fullyLoadedUrls.add(startUrl);
+        this.loadCancelledUrl = null;
+      } else if (cancelled || stillValid()) {
+        // 사용자가 멈췄거나, 끝까지 갔지만 이어지지 않는 구간이 남은 경우 → 다시 시도 안내
+        this.loadCancelledUrl = startUrl;
+      }
       if (stillValid()) {
         this.jumpScroll(scroller, originalTop);
       }
