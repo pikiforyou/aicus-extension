@@ -1551,8 +1551,9 @@ class AicusNavigator {
 
     const findLive = () => this.adapter.getUserMessages().find(el => this.getTurnKey(el) === question.key);
 
-    const scrollAndSettle = (el) => {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // smooth: 이미 렌더된 질문으로 갈 때 / instant: 한 화면씩 찾아온 뒤 (애니메이션이 겹쳐 버벅이지 않도록)
+    const scrollAndSettle = (el, behavior = 'smooth') => {
+      el.scrollIntoView({ behavior, block: 'center' });
       this.highlightElement(el);
       // 스크롤 중 위쪽 질문이 다시 렌더되며 높이가 바뀌면 목표에서 벗어날 수 있어 한 번 보정
       setTimeout(() => {
@@ -1565,7 +1566,7 @@ class AicusNavigator {
         }
         const rect = live.getBoundingClientRect();
         if (rect.top < 0 || rect.bottom > window.innerHeight) {
-          live.scrollIntoView({ behavior: 'auto', block: 'center' });
+          live.scrollIntoView({ behavior: 'instant', block: 'center' });
           this.highlightElement(live);
         }
       }, 700);
@@ -1587,7 +1588,7 @@ class AicusNavigator {
 
     const targetIdx = this.questionOrder.indexOf(question.key);
     if (question.y != null) {
-      scroller.scrollTop = Math.max(0, question.y - scroller.clientHeight / 2);
+      this.jumpScroll(scroller, Math.max(0, question.y - scroller.clientHeight / 2));
     }
 
     // 대화 전체를 한쪽 끝에서 반대쪽 끝까지 훑을 수 있는 횟수 (긴 답변이 많아도 중간에 멈추지 않도록)
@@ -1598,7 +1599,7 @@ class AicusNavigator {
     const step = () => {
       const el = findLive();
       if (el) {
-        scrollAndSettle(el);
+        scrollAndSettle(el, 'instant');
         return;
       }
       if (++tries > maxTries) return;
@@ -1610,10 +1611,10 @@ class AicusNavigator {
         .filter(i => i >= 0);
       const minIdx = renderedIdx.length ? Math.min(...renderedIdx) : -1;
       const dir = minIdx === -1 || targetIdx < minIdx ? -1 : 1;
-      scroller.scrollTop += dir * stepSize;
-      setTimeout(step, 250);
+      this.jumpScroll(scroller, scroller.scrollTop + dir * stepSize);
+      setTimeout(step, 150);
     };
-    setTimeout(step, 250);
+    setTimeout(step, 150);
   }
 
   highlightElement(element) {
