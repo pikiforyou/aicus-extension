@@ -801,6 +801,12 @@ class AicusNavigator {
   updateQuestionsList() {
     const content = this.shadowRoot.querySelector('.content');
 
+    // 전체 불러오기 버튼은 누적 목록을 쓰는 사이트(Claude, ChatGPT)에서만 표시
+    const loadAllBtn = this.shadowRoot.querySelector('.load-all-btn');
+    if (loadAllBtn) {
+      loadAllBtn.hidden = this.questionMap.size === 0;
+    }
+
     if (this.questions.length === 0) {
       const isOnChat = this.adapter.isOnChatPage();
       
@@ -944,6 +950,15 @@ class AicusNavigator {
 
       .dark .control-btn {
         color: #e2e8f0;
+      }
+
+      .control-btn[hidden] {
+        display: none;
+      }
+
+      .control-btn:disabled {
+        opacity: 0.4;
+        cursor: progress;
       }
 
       .control-btn:hover {
@@ -1247,6 +1262,7 @@ class AicusNavigator {
         </svg>
         <span class="title">Aicus</span>
         <div class="controls">
+          <button class="control-btn load-all-btn" title="전체 질문 불러오기 (대화를 한 번 훑은 뒤 원래 위치로 돌아옵니다)" hidden>⇅</button>
           <button class="control-btn settings-btn" title="설정">
             <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10 2.5a1.5 1.5 0 011.5 1.5v.5c.494.227.965.497 1.405.806l.353-.353a1.5 1.5 0 112.122 2.122l-.353.353c.309.44.579.911.806 1.405h.5a1.5 1.5 0 010 3h-.5a7.5 7.5 0 01-.806 1.405l.353.353a1.5 1.5 0 11-2.122 2.122l-.353-.353A7.5 7.5 0 0111.5 15.5v.5a1.5 1.5 0 01-3 0v-.5a7.5 7.5 0 01-1.405-.806l-.353.353a1.5 1.5 0 11-2.122-2.122l.353-.353A7.5 7.5 0 014.167 11.5h-.5a1.5 1.5 0 010-3h.5c.227-.494.497-.965.806-1.405L4.62 6.742a1.5 1.5 0 112.122-2.122l.353.353c.44-.309.911-.579 1.405-.806V4a1.5 1.5 0 011.5-1.5zM10 7a3 3 0 100 6 3 3 0 000-6z"/>
@@ -1415,6 +1431,12 @@ class AicusNavigator {
     });
     
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
+
+    const loadAllBtn = this.shadowRoot.querySelector('.load-all-btn');
+    loadAllBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.loadAllQuestions();
+    });
     closeBtn.addEventListener('click', () => this.hide());
   }
 
@@ -1444,6 +1466,57 @@ class AicusNavigator {
     }
     this.previewTooltip.style.left = left + 'px';
     this.previewTooltip.style.top = top + 'px';
+  }
+
+  // 대화를 맨 위부터 한 화면씩 훑어 화면 밖 질문까지 모은 뒤 원래 위치로 복귀
+  // 사용자가 휠/터치/키 입력을 하면 즉시 중단
+  async loadAllQuestions() {
+    if (this.isLoadingAll) return;
+    const first = this.adapter.getUserMessages()[0];
+    if (!first) return;
+    const scroller = this.findScroller(first);
+    if (!scroller) return;
+
+    this.isLoadingAll = true;
+    const btn = this.shadowRoot.querySelector('.load-all-btn');
+    btn.disabled = true;
+
+    const startUrl = window.location.href;
+    const originalTop = scroller.scrollTop;
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    window.addEventListener('wheel', cancel, { capture: true, passive: true });
+    window.addEventListener('touchstart', cancel, { capture: true, passive: true });
+    window.addEventListener('keydown', cancel, true);
+
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const stillValid = () => !cancelled && window.location.href === startUrl;
+
+    try {
+      scroller.scrollTop = 0;
+      await wait(300);
+      const stepSize = scroller.clientHeight * 0.8;
+      const maxSteps = Math.ceil(scroller.scrollHeight / stepSize) + 5;
+
+      for (let i = 0; i < maxSteps && stillValid(); i++) {
+        this.mergeKeyedQuestions(this.adapter.getUserMessages());
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) break;
+        scroller.scrollTop += stepSize;
+        await wait(250);
+      }
+      if (stillValid()) {
+        this.mergeKeyedQuestions(this.adapter.getUserMessages());
+      }
+    } finally {
+      window.removeEventListener('wheel', cancel, { capture: true });
+      window.removeEventListener('touchstart', cancel, { capture: true });
+      window.removeEventListener('keydown', cancel, true);
+      if (stillValid()) {
+        scroller.scrollTop = originalTop;
+      }
+      btn.disabled = false;
+      this.isLoadingAll = false;
+    }
   }
 
   scrollToQuestion(question) {
