@@ -603,7 +603,7 @@ class AicusNavigator {
     // 전체 불러오기를 끝까지 마친 대화 / 중간에 멈춘 대화 (안내줄 표시용, 메모리만)
     this.fullyLoadedUrls = new Set();
     this.missingTurnsUrls = new Set();
-    this.loadCancelledUrl = null;
+    this.loadEndState = null; // { url, kind: 'cancelled' | 'incomplete' }
     this.scroller = null;
     this.previewTooltip = null;
     this.donationModal = null;
@@ -1715,8 +1715,10 @@ class AicusNavigator {
       message = `전체 질문 불러오는 중… ${count}개 찾음 · 스크롤하면 중단`;
     } else if (!this.isKeyedMode() || this.fullyLoadedUrls.has(url) || !this.isMissingTurnsSeen(url)) {
       message = null;
-    } else if (this.loadCancelledUrl === url) {
-      message = `중단됨 · ${count}개 · 다시 하려면`;
+    } else if (this.loadEndState && this.loadEndState.url === url) {
+      message = this.loadEndState.kind === 'cancelled'
+        ? `중단됨 · ${count}개 · 다시 하려면`
+        : `일부 못 불러옴 · ${count}개 · 다시 하려면`;
       after = '눌러주세요';
     } else {
       message = '전체 질문을 보려면';
@@ -1816,11 +1818,20 @@ class AicusNavigator {
     };
 
     // (a) 그려진 턴 목록·질문 수·전체 높이가 40ms 간격으로 두 번 연속 같으면 다 그려진 것으로 봄 (최대 약 1.5초)
-    const settle = async () => {
+    const settle = async (expectChange = false) => {
       const signature = () =>
         turnKeys().join(',') + '|' + this.adapter.getUserMessages().length + '|' + scroller.scrollHeight;
       const s0 = performance.now();
       let prev = signature();
+      // 멀리 이동한 직후 Claude는 약 0.2초간 이전 화면을 그대로 둠(실측) → "변화 없음"을 "다 그려짐"으로
+      // 오판하지 않도록, 화면이 바뀌어야 하는 이동이면 먼저 바뀔 때까지 기다림 (최대 1.5초)
+      if (expectChange) {
+        for (let i = 0; i < 38 && stillValid(); i++) {
+          await wait(40);
+          if (signature() !== prev) break;
+        }
+        prev = signature();
+      }
       let same = 0;
       for (let i = 0; i < 38 && stillValid(); i++) {
         await wait(40);
@@ -1842,25 +1853,33 @@ class AicusNavigator {
     };
 
     const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-    let complete = false;
 
-    try {
-      // 1) 맨 위로: 첫 턴이 대화 영역 맨 위 근처에 그려지고 화면이 안정될 때까지 반복 (최대 약 10초)
+    // 1) 맨 위로: 맨 위 첫 턴과 전체 높이가 두 번 연속 같을 때만 맨 위로 인정 (최대 약 10초)
+    //    (위치값은 Claude가 높이를 다시 재는 동안 믿을 수 없어 턴 키로 판정 — 실측)
+    const goTop = async (pass) => {
+      covered.clear();
+      let prevFirst = null;
+      let prevH = -1;
       const started = Date.now();
-      while (stillValid() && Date.now() - started < 10000) {
+      for (let i = 0; stillValid() && Date.now() - started < 10000; i++) {
+        const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
-        const settleMs = await settle();
-        const first = this.getRenderedTurns()[0];
-        const firstY = first ? this.getScrollY(first, scroller) : null;
-        snapshot({ phase: 'top', settleMs, firstY });
-        if (scroller.scrollTop <= 2 && first && firstY < scroller.clientHeight * 0.5) {
+        const settleMs = await settle(far);
+        const firstKey = turnKeys()[0] || null;
+        snapshot({ phase: 'top', pass, settleMs });
+        if (scroller.scrollTop <= 2 && firstKey && firstKey === prevFirst && scroller.scrollHeight === prevH) {
           break;
         }
+        prevFirst = firstKey;
+        prevH = scroller.scrollHeight;
       }
       if (stillValid()) collect();
-      snapshot({ phase: 'topDone' });
+      snapshot({ phase: 'topDone', pass });
+    };
 
-      // 2) 아래로 훑기: 이어지지 않으면(건너뜀) 되돌아가 이동 폭을 절반씩 줄여 다시 시도
+    // 2) 아래로 훑기: 새 화면이 이전에 읽은 턴과 이어지지 않으면 되돌아가 이동 폭을 절반씩 줄여 재시도
+    //    반환: 끝까지 이어서 읽었는지
+    const walkDown = async (pass) => {
       const fullStep = scroller.clientHeight * 0.9;
       const minStep = scroller.clientHeight * 0.1;
       let gapFound = false;
@@ -1871,11 +1890,11 @@ class AicusNavigator {
         while (stillValid()) {
           this.jumpScroll(scroller, before + step);
           const settleMs = await settle();
-          snapshot({ phase: 'step', step: Math.round(step), settleMs });
+          snapshot({ phase: 'step', pass, step: Math.round(step), settleMs });
           if (isContinuous()) { continuous = true; break; }
           // 그리기가 늦게 끝났을 수 있으니 한 번 더 기다려 확인
           await wait(200);
-          snapshot({ phase: 'recheck' });
+          snapshot({ phase: 'recheck', pass });
           if (isContinuous()) { continuous = true; break; }
           if (step <= minStep) break;
           step /= 2;
@@ -1886,15 +1905,26 @@ class AicusNavigator {
         this.setLoadProgress((scroller.scrollTop + scroller.clientHeight) / scroller.scrollHeight);
         if (Math.abs(scroller.scrollTop - before) < 1) break; // 더 내려가지 않음
       }
+      if (stillValid()) collect();
+      return stillValid() && atBottom() && !gapFound;
+    };
 
-      if (stillValid()) {
-        collect();
-        complete = atBottom() && !gapFound;
+    let complete = false;
+    let passes = 0;
+
+    try {
+      // 처음 여는 긴 대화는 첫 훑기 중 Claude가 답변 높이를 다시 재며 위치가 크게 튐(실측: 높이 17560→42247).
+      // 이어지지 않은 구간이 남았으면 높이가 확정된 상태에서 한 번 더 훑음 (최대 2회)
+      for (passes = 1; passes <= 2 && stillValid(); passes++) {
+        this.setLoadProgress(0);
+        await goTop(passes);
+        complete = await walkDown(passes);
+        if (complete) break;
       }
       if (AICUS_DEBUG) {
         debugLog('loadAll', {
           result: {
-            complete, gapFound, atBottom: atBottom(), cancelled, cancelReason,
+            complete, passes, atBottom: atBottom(), cancelled, cancelReason,
             urlChanged: window.location.href !== startUrl,
             top: Math.round(scroller.scrollTop), h: scroller.scrollHeight, ch: scroller.clientHeight,
             cov: covered.size, q: this.questions.length, ms: Math.round(performance.now() - t0)
@@ -1906,12 +1936,14 @@ class AicusNavigator {
       window.removeEventListener('wheel', cancel, { capture: true });
       window.removeEventListener('touchstart', cancel, { capture: true });
       window.removeEventListener('keydown', cancel, true);
+      // 안내줄 상태: 다 불러옴 / 사용자가 멈춤 / 두 번 훑어도 이어지지 않는 구간이 남음
       if (complete) {
         this.fullyLoadedUrls.add(startUrl);
-        this.loadCancelledUrl = null;
-      } else if (cancelled || stillValid()) {
-        // 사용자가 멈췄거나, 끝까지 갔지만 이어지지 않는 구간이 남은 경우 → 다시 시도 안내
-        this.loadCancelledUrl = startUrl;
+        this.loadEndState = null;
+      } else if (cancelled) {
+        this.loadEndState = { url: startUrl, kind: 'cancelled' };
+      } else if (stillValid()) {
+        this.loadEndState = { url: startUrl, kind: 'incomplete' };
       }
       if (stillValid()) {
         this.jumpScroll(scroller, originalTop);
