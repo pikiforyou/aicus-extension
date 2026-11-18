@@ -1468,6 +1468,11 @@ class AicusNavigator {
     this.previewTooltip.style.top = top + 'px';
   }
 
+  // 페이지 CSS에 scroll-behavior: smooth가 있어도 애니메이션 없이 즉시 이동
+  jumpScroll(scroller, top) {
+    scroller.scrollTo({ top, behavior: 'instant' });
+  }
+
   // 대화를 맨 위부터 한 화면씩 훑어 화면 밖 질문까지 모은 뒤 원래 위치로 복귀
   // 사용자가 휠/터치/키 입력을 하면 즉시 중단
   async loadAllQuestions() {
@@ -1493,16 +1498,31 @@ class AicusNavigator {
     const stillValid = () => !cancelled && window.location.href === startUrl;
 
     try {
-      scroller.scrollTop = 0;
-      await wait(300);
-      const stepSize = scroller.clientHeight * 0.8;
-      const maxSteps = Math.ceil(scroller.scrollHeight / stepSize) + 5;
+      // 1) 맨 위로: 긴 대화는 맨 위에 닿을 때 이전 메시지를 더 불러오며 위치가 밀릴 수 있어(추정)
+      //    scrollTop이 0이고 전체 높이가 두 번 연속 그대로일 때까지 반복 (최대 약 10초)
+      let lastHeight = -1;
+      let stable = 0;
+      for (let i = 0; i < 40 && stillValid(); i++) {
+        this.jumpScroll(scroller, 0);
+        await wait(250);
+        this.mergeKeyedQuestions(this.adapter.getUserMessages());
+        if (scroller.scrollTop <= 2 && scroller.scrollHeight === lastHeight) {
+          if (++stable >= 2) break;
+        } else {
+          stable = 0;
+        }
+        lastHeight = scroller.scrollHeight;
+      }
 
-      for (let i = 0; i < maxSteps && stillValid(); i++) {
+      // 2) 한 화면씩 아래로: 높이가 바뀌어도 실제 끝에 닿거나 더 내려가지 않을 때까지
+      const stepSize = scroller.clientHeight * 0.8;
+      for (let i = 0; i < 1000 && stillValid(); i++) {
         this.mergeKeyedQuestions(this.adapter.getUserMessages());
         if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) break;
-        scroller.scrollTop += stepSize;
+        const before = scroller.scrollTop;
+        this.jumpScroll(scroller, before + stepSize);
         await wait(250);
+        if (Math.abs(scroller.scrollTop - before) < 1) break;
       }
       if (stillValid()) {
         this.mergeKeyedQuestions(this.adapter.getUserMessages());
@@ -1512,7 +1532,7 @@ class AicusNavigator {
       window.removeEventListener('touchstart', cancel, { capture: true });
       window.removeEventListener('keydown', cancel, true);
       if (stillValid()) {
-        scroller.scrollTop = originalTop;
+        this.jumpScroll(scroller, originalTop);
       }
       btn.disabled = false;
       this.isLoadingAll = false;
