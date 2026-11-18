@@ -651,7 +651,7 @@ class AicusNavigator {
     this.resetIfUrlChanged();
 
     // 안정적인 키(data-turn-key)가 있는 사이트는 화면 밖으로 빠진 질문도 유지하도록 누적
-    if (this.questionMap.size > 0 || userMessages.some(el => this.getTurnKey(el))) {
+    if (this.isKeyedMode(userMessages)) {
       this.mergeKeyedQuestions(userMessages);
       return;
     }
@@ -694,6 +694,26 @@ class AicusNavigator {
   getTurnKey(el) {
     const row = el.closest('[data-turn-key]');
     return row ? row.getAttribute('data-turn-key') : null;
+  }
+
+  // 지금 그려져 있는 대화 턴(질문+답변, 바깥쪽 것만). Claude/ChatGPT에서 측정 확인
+  getRenderedTurns() {
+    return [...document.querySelectorAll('[data-turn-key]')]
+      .filter(t => !t.parentElement || !t.parentElement.closest('[data-turn-key]'))
+      // ChatGPT는 New Chat 후에도 이전 대화 턴을 숨긴 채 남겨 두므로 보이는 것만
+      .filter(t => this.adapter.isElementVisible(t));
+  }
+
+  // 누적 목록 방식 사이트인지: 질문이 하나도 안 그려져 있어도(긴 답변만 보이는 위치) 턴이 있으면 해당
+  isKeyedMode(userMessages = this.adapter.getUserMessages()) {
+    return this.questionMap.size > 0 ||
+      userMessages.some(el => this.getTurnKey(el)) ||
+      this.getRenderedTurns().length > 0;
+  }
+
+  // 스크롤 영역을 찾을 기준 요소: 질문이 없으면 아무 턴이나
+  getAnchorElement() {
+    return this.adapter.getUserMessages()[0] || this.getRenderedTurns()[0] || null;
   }
 
   // 질문 요소를 감싸는 스크롤 컨테이너 (overflow auto/scroll 인 첫 조상)
@@ -809,7 +829,7 @@ class AicusNavigator {
   captureRendered() {
     const urlChanged = this.resetIfUrlChanged();
     const userMessages = this.adapter.getUserMessages();
-    if (this.questionMap.size === 0 && !userMessages.some(el => this.getTurnKey(el))) return;
+    if (!this.isKeyedMode(userMessages)) return;
     // 기억해 둔 대화로 돌아온 경우 새 질문이 없어도 목록을 바로 교체
     if (this.mergeRendered(userMessages, false) || urlChanged) {
       this.buildKeyedQuestions();
@@ -852,16 +872,21 @@ class AicusNavigator {
     // 전체 불러오기 버튼은 누적 목록을 쓰는 사이트(Claude, ChatGPT)에서만 표시
     const loadAllBtn = this.shadowRoot.querySelector('.load-all-btn');
     if (loadAllBtn) {
-      loadAllBtn.hidden = this.questionMap.size === 0;
+      loadAllBtn.hidden = !this.isKeyedMode();
     }
     this.updateLoadStatus();
 
     if (this.questions.length === 0) {
       const isOnChat = this.adapter.isOnChatPage();
-      
+      // 긴 답변만 그려진 위치: 대화는 있는데 질문이 화면 밖에 있음
+      const offscreenOnly = !isOnChat && this.getRenderedTurns().length > 0;
+      const message = isOnChat ? '질문을 찾는 중...'
+        : offscreenOnly ? '화면에 보이는 질문이 없어요.'
+        : '질문을 찾을 수 없습니다.';
+
       content.innerHTML = `
         <div class="empty-state">
-          <div>${isOnChat ? '질문을 찾는 중...' : '질문을 찾을 수 없습니다.'}</div>
+          <div>${message}</div>
         </div>
       `;
       return;
@@ -1625,7 +1650,7 @@ class AicusNavigator {
 
   // 대화 영역이 스크롤될 만큼 긴지 (짧은 대화는 질문이 전부 렌더되므로 안내 불필요)
   isConversationScrollable() {
-    const first = this.adapter.getUserMessages()[0];
+    const first = this.getAnchorElement();
     if (!first) return false;
     const scroller = this.findScroller(first);
     return !!scroller && scroller.scrollHeight > scroller.clientHeight + 50;
@@ -1670,7 +1695,7 @@ class AicusNavigator {
   // 사용자가 휠/터치/키 입력을 하면 즉시 중단
   async loadAllQuestions() {
     if (this.isLoadingAll) return;
-    const first = this.adapter.getUserMessages()[0];
+    const first = this.getAnchorElement();
     if (!first) return;
     const scroller = this.findScroller(first);
     // 스크롤할 대화 영역이 없으면(로딩 중 등) 시작하지 않음 → "다 불러옴"으로 잘못 처리되지 않도록
@@ -1783,7 +1808,7 @@ class AicusNavigator {
 
     // DOM에서 빠진 질문: 저장된 위치(있으면)로 먼저 이동한 뒤,
     // 지금 렌더된 질문들과 목록 순서를 비교해 위/아래로 한 화면씩 이동하며 다시 찾기
-    const anyRendered = this.adapter.getUserMessages()[0];
+    const anyRendered = this.getAnchorElement();
     const scroller = this.scroller && this.scroller.isConnected
       ? this.scroller
       : (anyRendered ? this.findScroller(anyRendered) : null);
