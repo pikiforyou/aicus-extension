@@ -1,3 +1,13 @@
+// ===== 0. 진단 기록 =====
+// 페이지 콘솔에서 localStorage.aicusDebug = '1' 후 새로고침하면 켜짐 (끄기: localStorage.removeItem('aicusDebug'))
+// 개수/위치/시간만 기록하고 대화 텍스트는 기록하지 않음
+const AICUS_DEBUG = (() => {
+  try { return localStorage.getItem('aicusDebug') === '1'; } catch (e) { return false; }
+})();
+const debugLog = (label, data) => {
+  if (AICUS_DEBUG) console.log(`[aicus-debug] ${label}`, JSON.stringify(data));
+};
+
 // ===== 1. 사이트별 어댑터 시스템 =====
 class ChatSiteAdapter {
   constructor() {
@@ -654,8 +664,22 @@ class AicusNavigator {
     this.observer.start();
   }
 
+  // 진단용: 대화 이동 후 경과 시간과 그 시점 DOM 상태 (개수만)
+  debugDomState(label) {
+    if (!AICUS_DEBUG) return;
+    debugLog(label, {
+      ms: Math.round(performance.now() - (this.navAt || 0)),
+      user: this.adapter.getUserMessages().length,
+      turns: this.getRenderedTurns().length,
+      turnsAll: document.querySelectorAll('[data-turn-key]').length,
+      map: this.questionMap.size,
+      list: this.questions.length
+    });
+  }
+
   scanForQuestions() {
     let userMessages = this.adapter.getUserMessages();
+    this.debugDomState('scan');
 
     // 다른 대화로 이동했으면 누적 목록 초기화 (URL 폴링 2초를 기다리지 않고 스캔 시점에 바로 판정)
     this.resetIfUrlChanged();
@@ -767,6 +791,8 @@ class AicusNavigator {
   // URL이 바뀐 순간: 누적 목록 사이트는 DOM을 읽지 않고 바로 비우거나 기억해 둔 목록을 표시
   // (ChatGPT는 이전 대화 질문을 숨긴 채 DOM에 남겨 두므로 이 시점에 DOM을 읽으면 섞일 수 있음)
   showListForCurrentUrl() {
+    this.navAt = performance.now();
+    this.debugDomState('nav');
     const wasKeyed = this.questionMap.size > 0;
     if (!this.resetIfUrlChanged()) return;
     if (!wasKeyed && this.questionMap.size === 0) return; // Gemini 등은 기존 스캔에 맡김
@@ -837,6 +863,7 @@ class AicusNavigator {
 
   // 변화가 감지될 때마다 즉시 호출: 잠깐만 렌더되고 빠지는 질문도 놓치지 않도록 키와 텍스트만 기록
   captureRendered() {
+    if (!this.isLoadingAll) this.debugDomState('mutation');
     const urlChanged = this.resetIfUrlChanged();
     const userMessages = this.adapter.getUserMessages();
     if (!this.isKeyedMode(userMessages)) return;
@@ -893,6 +920,9 @@ class AicusNavigator {
       const message = isOnChat ? '질문을 찾는 중...'
         : offscreenOnly ? '화면에 보이는 질문이 없어요.'
         : '질문을 찾을 수 없습니다.';
+      if (AICUS_DEBUG) {
+        debugLog('empty', { ms: Math.round(performance.now() - (this.navAt || 0)), kind: isOnChat ? 'searching' : offscreenOnly ? 'offscreen' : 'notfound' });
+      }
 
       content.innerHTML = `
         <div class="empty-state">
@@ -1741,7 +1771,15 @@ class AicusNavigator {
     const startUrl = window.location.href;
     const originalTop = scroller.scrollTop;
     let cancelled = false;
-    const cancel = () => { cancelled = true; };
+    let cancelReason = null;
+    const cancel = (e) => {
+      if (!cancelled) cancelReason = e.type;
+      cancelled = true;
+    };
+    // 진단 기록 (AICUS_DEBUG일 때만): 단계별 위치/개수/시간
+    const t0 = performance.now();
+    const trace = [];
+    const coveredOrder = [];
     window.addEventListener('wheel', cancel, { capture: true, passive: true });
     window.addEventListener('touchstart', cancel, { capture: true, passive: true });
     window.addEventListener('keydown', cancel, true);
@@ -1755,25 +1793,46 @@ class AicusNavigator {
     const covered = new Set(); // 지금까지 읽은 턴 키
     const collect = () => {
       this.mergeKeyedQuestions(this.adapter.getUserMessages());
-      turnKeys().forEach(k => covered.add(k));
+      turnKeys().forEach(k => {
+        if (!covered.has(k)) coveredOrder.push(k);
+        covered.add(k);
+      });
+    };
+    // 지금 그려진 턴 범위를 "읽은 순서 번호"로 표시 (-1 = 아직 안 읽은 턴)
+    const snapshot = (extra) => {
+      if (!AICUS_DEBUG) return;
+      const keys = turnKeys();
+      trace.push({
+        ms: Math.round(performance.now() - t0),
+        top: Math.round(scroller.scrollTop),
+        h: scroller.scrollHeight,
+        n: keys.length,
+        first: keys.length ? coveredOrder.indexOf(keys[0]) : null,
+        last: keys.length ? coveredOrder.indexOf(keys[keys.length - 1]) : null,
+        cov: covered.size,
+        q: this.questions.length,
+        ...extra
+      });
     };
 
     // (a) 그려진 턴 목록·질문 수·전체 높이가 40ms 간격으로 두 번 연속 같으면 다 그려진 것으로 봄 (최대 약 1.5초)
     const settle = async () => {
       const signature = () =>
         turnKeys().join(',') + '|' + this.adapter.getUserMessages().length + '|' + scroller.scrollHeight;
+      const s0 = performance.now();
       let prev = signature();
       let same = 0;
       for (let i = 0; i < 38 && stillValid(); i++) {
         await wait(40);
         const cur = signature();
         if (cur === prev) {
-          if (++same >= 2) return;
+          if (++same >= 2) return Math.round(performance.now() - s0);
         } else {
           same = 0;
           prev = cur;
         }
       }
+      return Math.round(performance.now() - s0);
     };
 
     // (b) 새 화면의 맨 위 턴을 이미 읽었으면 이전 화면과 이어진 것 (사이에 건너뛴 턴 없음)
@@ -1790,14 +1849,16 @@ class AicusNavigator {
       const started = Date.now();
       while (stillValid() && Date.now() - started < 10000) {
         this.jumpScroll(scroller, 0);
-        await settle();
+        const settleMs = await settle();
         const first = this.getRenderedTurns()[0];
-        if (scroller.scrollTop <= 2 && first &&
-            this.getScrollY(first, scroller) < scroller.clientHeight * 0.5) {
+        const firstY = first ? this.getScrollY(first, scroller) : null;
+        snapshot({ phase: 'top', settleMs, firstY });
+        if (scroller.scrollTop <= 2 && first && firstY < scroller.clientHeight * 0.5) {
           break;
         }
       }
       if (stillValid()) collect();
+      snapshot({ phase: 'topDone' });
 
       // 2) 아래로 훑기: 이어지지 않으면(건너뜀) 되돌아가 이동 폭을 절반씩 줄여 다시 시도
       const fullStep = scroller.clientHeight * 0.9;
@@ -1809,10 +1870,12 @@ class AicusNavigator {
         let continuous = false;
         while (stillValid()) {
           this.jumpScroll(scroller, before + step);
-          await settle();
+          const settleMs = await settle();
+          snapshot({ phase: 'step', step: Math.round(step), settleMs });
           if (isContinuous()) { continuous = true; break; }
           // 그리기가 늦게 끝났을 수 있으니 한 번 더 기다려 확인
           await wait(200);
+          snapshot({ phase: 'recheck' });
           if (isContinuous()) { continuous = true; break; }
           if (step <= minStep) break;
           step /= 2;
@@ -1827,6 +1890,17 @@ class AicusNavigator {
       if (stillValid()) {
         collect();
         complete = atBottom() && !gapFound;
+      }
+      if (AICUS_DEBUG) {
+        debugLog('loadAll', {
+          result: {
+            complete, gapFound, atBottom: atBottom(), cancelled, cancelReason,
+            urlChanged: window.location.href !== startUrl,
+            top: Math.round(scroller.scrollTop), h: scroller.scrollHeight, ch: scroller.clientHeight,
+            cov: covered.size, q: this.questions.length, ms: Math.round(performance.now() - t0)
+          },
+          trace
+        });
       }
     } finally {
       window.removeEventListener('wheel', cancel, { capture: true });
