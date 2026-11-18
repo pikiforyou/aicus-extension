@@ -1081,15 +1081,12 @@ class AicusNavigator {
       .load-status-row {
         display: flex;
         align-items: center;
-        gap: 6px;
-      }
-
-      .load-status-text {
-        flex: 1;
+        flex-wrap: wrap;
+        gap: 2px;
       }
 
       .load-status-btn {
-        border: none;
+        border: 1px solid currentColor;
         background: none;
         border-radius: 4px;
         cursor: pointer;
@@ -1447,6 +1444,7 @@ class AicusNavigator {
         <div class="load-status-row">
           <span class="load-status-text"></span>
           <button class="load-status-btn" title="전체 질문 불러오기">⇅</button>
+          <span class="load-status-after"></span>
         </div>
         <div class="load-progress" hidden><div class="load-progress-bar"></div></div>
       </div>
@@ -1676,21 +1674,26 @@ class AicusNavigator {
     const url = window.location.href;
     const count = this.questions.length;
 
+    // message: ⇅ 버튼 앞 문구, after: 버튼 뒤 문구
     let message = null;
+    let after = '';
     if (this.isLoadingAll) {
       message = `전체 질문 불러오는 중… ${count}개 찾음 · 스크롤하면 중단`;
     } else if (!this.isKeyedMode() || this.fullyLoadedUrls.has(url) || !this.hasUnrenderedTurns()) {
       message = null;
     } else if (this.loadCancelledUrl === url) {
-      message = `중단됨 · ${count}개까지 불러옴`;
+      message = `중단됨 · ${count}개 · 다시 하려면`;
+      after = '눌러주세요';
     } else {
-      message = '전체 질문을 보려면 눌러주세요';
+      message = '전체 질문을 보려면';
+      after = '눌러주세요';
     }
 
     const wasHidden = box.hidden;
     box.hidden = !message;
     if (message) {
       box.querySelector('.load-status-text').textContent = message;
+      box.querySelector('.load-status-after').textContent = after;
       box.querySelector('.load-status-btn').hidden = this.isLoadingAll;
       box.querySelector('.load-progress').hidden = !this.isLoadingAll;
     }
