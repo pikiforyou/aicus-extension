@@ -927,6 +927,7 @@ class AicusNavigator {
       content.innerHTML = `
         <div class="empty-state">
           <div>${message}</div>
+          ${offscreenOnly && !isOnChat ? '<div class="empty-sub">⇅ 버튼으로 전체 질문을 불러올 수 있어요.</div>' : ''}
         </div>
       `;
       return;
@@ -1244,6 +1245,12 @@ class AicusNavigator {
 
       .dark .question-text {
         color: #e2e8f0;
+      }
+
+      .empty-sub {
+        margin-top: 6px;
+        font-size: 11px;
+        opacity: 0.8;
       }
 
       .empty-state {
