@@ -635,7 +635,10 @@ class AicusNavigator {
       { name: 'Italian Plum', color: '#5D4E75' },
       { name: 'Living Coral', color: '#FF6F61' }
     ];
-    
+
+    // 고른 색 기억 (사이트 localStorage, 사이트별로 따로 저장됨)
+    this.restoreAccentColor();
+
     // 어댑터 초기화
     this.adapter = new ChatSiteAdapter();
     
@@ -1510,6 +1513,7 @@ class AicusNavigator {
     navigator.querySelector('.color-palette').addEventListener('click', (e) => {
       if (e.target.classList.contains('color-option')) {
         this.settings.accentColor = e.target.dataset.color;
+        this.saveAccentColor();
         this.applyColorScheme();
         this.updateColorPalette();
       }
@@ -2142,6 +2146,30 @@ class AicusNavigator {
         content.classList.remove('scrollable');
       }
     }, 0);
+  }
+
+  // 저장소 접근이 막힌 환경(오류 발생)이면 기본색을 쓰고 이후 저장도 하지 않음
+  // 팔레트에 있는 색만 받아들여, 값이 깨졌거나 바뀌어 있으면 무시
+  restoreAccentColor() {
+    this.accentStorageOk = false;
+    try {
+      const saved = localStorage.getItem('aicusAccentColor');
+      this.accentStorageOk = true;
+      if (saved && this.colorPalette.some(c => c.color === saved)) {
+        this.settings.accentColor = saved;
+      }
+    } catch (e) {
+      // 기본색 유지
+    }
+  }
+
+  saveAccentColor() {
+    if (!this.accentStorageOk) return;
+    try {
+      localStorage.setItem('aicusAccentColor', this.settings.accentColor);
+    } catch (e) {
+      // 저장 실패(용량 초과 등): 이번 화면에서만 적용
+    }
   }
 
   updateColorPalette() {
