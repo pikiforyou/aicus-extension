@@ -98,8 +98,9 @@ class ChatSiteAdapter {
     return false;
   }
 
-  // 현재 채팅 페이지에 있는지 확인
-  isOnChatPage() {
+  // 질문 요소가 하나라도 있는지 (목록이 비었을 때 안내 문구 선택용)
+  // 새 대화 / 로딩 중 / 선택자 고장은 구분하지 않음 → 구분은 v1.3.0 selfCheck에서
+  hasQuestionElements() {
     if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
       return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'))
         .some(el => this.isElementVisible(el));
@@ -617,20 +618,21 @@ class AicusNavigator {
     this.updateLoadStatus();
 
     if (this.questions.length === 0) {
-      const isOnChat = this.adapter.isOnChatPage();
+      const hasQuestions = this.adapter.hasQuestionElements();
       // 긴 답변만 그려진 위치: 대화는 있는데 질문이 화면 밖에 있음
-      const offscreenOnly = !isOnChat && this.getRenderedTurns().length > 0;
-      const message = isOnChat ? '질문을 찾는 중...'
+      const offscreenOnly = !hasQuestions && this.getRenderedTurns().length > 0;
+      // 아무것도 없음: 새 대화 / 페이지 로딩 중 / 선택자 고장이 섞여 있어 오류처럼 들리지 않는 문구 사용
+      const message = hasQuestions ? '질문을 찾는 중...'
         : offscreenOnly ? '화면에 보이는 질문이 없어요.'
-        : '질문을 찾을 수 없습니다.';
+        : '아직 질문이 없어요.';
       if (AICUS_DEBUG) {
-        debugLog('empty', { ms: Math.round(performance.now() - (this.navAt || 0)), kind: isOnChat ? 'searching' : offscreenOnly ? 'offscreen' : 'notfound' });
+        debugLog('empty', { ms: Math.round(performance.now() - (this.navAt || 0)), kind: hasQuestions ? 'searching' : offscreenOnly ? 'offscreen' : 'notfound' });
       }
 
       content.innerHTML = `
         <div class="empty-state">
           <div>${message}</div>
-          ${offscreenOnly && !isOnChat ? '<div class="empty-sub">⇅ 버튼으로 전체 질문을 불러올 수 있어요.</div>' : ''}
+          ${offscreenOnly ? '<div class="empty-sub">⇅ 버튼으로 전체 질문을 불러올 수 있어요.</div>' : ''}
         </div>
       `;
       return;
