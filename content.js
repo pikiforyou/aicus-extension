@@ -1506,6 +1506,14 @@ class AicusNavigator {
     `;
 
     this.shadowRoot.appendChild(navigator);
+    // 팔레트는 색을 고를 때마다 HTML만 다시 그리므로 클릭 리스너는 여기서 한 번만 붙임
+    navigator.querySelector('.color-palette').addEventListener('click', (e) => {
+      if (e.target.classList.contains('color-option')) {
+        this.settings.accentColor = e.target.dataset.color;
+        this.applyColorScheme();
+        this.updateColorPalette();
+      }
+    });
     this.updateColorPalette();
     this.applyColorScheme();
     
@@ -2145,14 +2153,6 @@ class AicusNavigator {
            title="${color.name}">
       </div>
     `).join('');
-    colorPalette.addEventListener('click', (e) => {
-      if (e.target.classList.contains('color-option')) {
-        const newColor = e.target.dataset.color;
-        this.settings.accentColor = newColor;
-        this.applyColorScheme();
-        this.updateColorPalette();
-      }
-    });
   }
 
   applyColorScheme() {
