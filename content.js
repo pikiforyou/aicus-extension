@@ -5,7 +5,9 @@ const AICUS_DEBUG = (() => {
   try { return localStorage.getItem('aicusDebug') === '1'; } catch (e) { return false; }
 })();
 const debugLog = (label, data) => {
-  if (AICUS_DEBUG) console.log(`[aicus-debug] ${label}`, JSON.stringify(data));
+  if (!AICUS_DEBUG) return;
+  if (data === undefined) console.log(`[aicus-debug] ${label}`);
+  else console.log(`[aicus-debug] ${label}`, JSON.stringify(data));
 };
 
 // ===== 1. 사이트별 어댑터 시스템 =====
@@ -140,7 +142,7 @@ class ChatSiteAdapter {
         return text && text.trim().length > 0;
       });
       
-      console.log(`M365 Copilot: Found ${filteredMessages.length} user messages`);
+      debugLog('copilot-m365', { user: filteredMessages.length });
       return filteredMessages;
     }
     return [];
@@ -391,7 +393,7 @@ class OptimizedObserver {
     this.setupIframeWatchers();
     
     this.isObserving = true;
-    console.log('🧭 OptimizedObserver started');
+    debugLog('observer started');
   }
 
   stop() {
@@ -408,7 +410,7 @@ class OptimizedObserver {
     this.cleanupUrlWatcher();
     this.isObserving = false;
     
-    console.log('🧭 OptimizedObserver stopped');
+    debugLog('observer stopped');
   }
 
   setupIframeWatchers() {
@@ -422,7 +424,7 @@ class OptimizedObserver {
             iframe.dataset.aicusWatched = 'true';
             
             const iframeObserver = new MutationObserver((mutations) => {
-              console.log('🧭 Iframe mutation detected');
+              debugLog('iframe mutation');
               this.handleMutations(mutations);
             });
             
@@ -500,7 +502,7 @@ class OptimizedObserver {
   onUrlChange() {
     const newUrl = window.location.href;
     if (newUrl !== this.lastUrl) {
-      console.log('🧭 URL changed, scanning in 500ms');
+      debugLog('url changed');
       this.lastUrl = newUrl;
       // 이전 대화 목록을 즉시 비우거나 기억해 둔 목록으로 교체 (DOM 로딩을 기다리지 않음)
       if (this.onUrlChanged) {
@@ -535,7 +537,6 @@ class OptimizedObserver {
       return; // 채팅 관련 변화가 없으면 무시
     }
 
-    console.log(`🧭 Detected ${relevantMutations.length} relevant mutations`);
     if (this.onRelevantMutation) {
       this.onRelevantMutation();
     }
@@ -566,7 +567,6 @@ class OptimizedObserver {
   executeScan() {
     this.lastScanTime = Date.now();
     this.callback();
-    console.log('🧭 Scan executed');
   }
 
   forceScan() {
@@ -725,7 +725,7 @@ class AicusNavigator {
     this.questions = questions;
     this.updateQuestionsList();
     
-    console.log(`🧭 Found ${questions.length} valid questions`);
+    debugLog('found', { questions: questions.length });
   }
 
   getTurnKey(el) {
@@ -881,8 +881,6 @@ class AicusNavigator {
     this.mergeRendered(userMessages, true);
     this.buildKeyedQuestions();
     this.updateQuestionsList();
-
-    console.log(`🧭 Found ${this.questions.length} valid questions (rendered ${userMessages.length})`);
   }
 
   // 질문 유효성 검사
@@ -2370,7 +2368,7 @@ createDonationModal() {
     if (this.donationModal) {
       this.donationModal.remove();
     }
-    console.log('🧭 Aicus destroyed and cleaned up');
+    debugLog('destroyed');
   }
 }
 
@@ -2386,7 +2384,7 @@ createDonationModal() {
       aicusNavigator.destroy();
     }
     aicusNavigator = new AicusNavigator();
-    console.log('🧭 Aicus initialized');
+    debugLog('initialized');
   }
 
   if (document.readyState === 'loading') {
