@@ -31,119 +31,6 @@ class ChatSiteAdapter {
       return bubbles.map(bubble =>
         bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
       ).filter((el, index, arr) => arr.indexOf(el) === index);
-    } else if (this.hostname.includes('copilot.microsoft.com') || 
-               this.hostname.includes('copilot.cloud.microsoft') ||
-               this.hostname.includes('m365.cloud.microsoft') ||
-               this.hostname.includes('bing.com/chat')) {
-      
-      // M365 Copilot을 위한 확장된 셀렉터 목록
-      const copilotSelectors = [
-        // 기존 셀렉터들
-        '.fai-UserMessage__message',
-        '[id^="user-message-"]',
-        '[data-testid="chatOutput"]',
-        '.user-message',
-        '.human-turn',
-        '[data-role="user"]',
-        '.message.user',
-        
-        // M365 Copilot 전용 셀렉터들
-        '[data-testid="user-bubble"]',
-        '[data-testid="user-input-bubble"]',
-        '.user-bubble',
-        '.human-message',
-        '[role="user"]',
-        '[aria-label*="user" i]',
-        '[aria-label*="sent" i]',
-        '.message[data-author="user"]',
-        '.chat-message.user',
-        '.conversation-message.user',
-        
-        // iframe 내부 셀렉터들
-        'iframe[src*="copilot"] .user-message',
-        'iframe[src*="chat"] .user-message',
-        '.copilot-chat .user-message',
-        '.ms-copilot .user-message',
-        
-        // 일반적인 채팅 패턴
-        '.message:not(.assistant):not(.bot):not(.ai)',
-        '[class*="user"]:not([class*="assistant"]):not([class*="bot"])',
-        '.prompt',
-        '.input-message',
-        '.sent-message',
-        
-        // Microsoft UI 패턴
-        '[data-automation-id*="user"]',
-        '[data-automation-id*="input"]',
-        '.ms-Button--user',
-        '.fluent-message.user'
-      ];
-      
-      let userMessages = [];
-      
-      // iframe 내부도 검색
-      const checkInIframes = () => {
-        const iframes = document.querySelectorAll('iframe');
-        iframes.forEach(iframe => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-            if (iframeDoc) {
-              copilotSelectors.forEach(selector => {
-                try {
-                  const elements = Array.from(iframeDoc.querySelectorAll(selector));
-                  if (elements.length > 0) {
-                    userMessages = userMessages.concat(elements);
-                  }
-                } catch (e) {
-                  // 접근 권한 없음, 무시
-                }
-              });
-            }
-          } catch (e) {
-            // Cross-origin iframe, 무시
-          }
-        });
-      };
-      
-      // 메인 문서에서 검색
-      copilotSelectors.forEach(selector => {
-        try {
-          const elements = Array.from(document.querySelectorAll(selector));
-          if (elements.length > 0) {
-            userMessages = userMessages.concat(elements);
-          }
-        } catch (e) {
-          // 셀렉터 오류 무시
-        }
-      });
-      
-      // iframe도 확인
-      checkInIframes();
-
-      // 중복 제거
-      userMessages = Array.from(new Set(userMessages));
-      
-      // AI 응답 필터링 및 텍스트가 있는 것만 선택
-      const filteredMessages = userMessages.filter(element => {
-        // AI 응답 제외
-        const isAIResponse = element.classList.contains('assistant') || 
-                           element.classList.contains('ai-message') ||
-                           element.classList.contains('bot') ||
-                           element.classList.contains('copilot') ||
-                           element.querySelector('[data-testid="botOutput"]') ||
-                           element.closest('[data-role="assistant"]') ||
-                           element.getAttribute('data-author') === 'assistant' ||
-                           element.getAttribute('data-author') === 'bot';
-        
-        if (isAIResponse) return false;
-        
-        // 텍스트 내용이 있는지 확인
-        const text = this.extractText(element);
-        return text && text.trim().length > 0;
-      });
-      
-      debugLog('copilot-m365', { user: filteredMessages.length });
-      return filteredMessages;
     }
     return [];
   }
@@ -172,47 +59,6 @@ class ChatSiteAdapter {
           .map(el => el.textContent?.trim())
           .filter(t => t && t.length > 5)
           .join(' ');
-      }
-      return text;
-    } else if (this.hostname.includes('copilot.microsoft.com') || 
-               this.hostname.includes('copilot.cloud.microsoft') ||
-               this.hostname.includes('m365.cloud.microsoft') ||
-               this.hostname.includes('bing.com/chat')) {
-      
-      // M365 Copilot용 텍스트 추출 개선
-      const chatOutput = container.querySelector('[data-testid="chatOutput"]');
-      if (chatOutput) {
-        return chatOutput.textContent?.trim() || '';
-      }
-      
-      // 다양한 텍스트 컨테이너 시도
-      const textContainers = [
-        container.querySelector('.message-text'),
-        container.querySelector('.user-text'),
-        container.querySelector('.prompt-text'),
-        container.querySelector('[data-content]'),
-        container.querySelector('p'),
-        container.querySelector('div[role="text"]'),
-        container.querySelector('.text-content')
-      ].filter(el => el);
-      
-      for (const textContainer of textContainers) {
-        const text = textContainer.textContent?.trim();
-        if (text && text.length > 0) {
-          return text;
-        }
-      }
-      
-      // 직접 텍스트 추출
-      let text = container.textContent?.trim();
-      if (!text) {
-        const textElements = container.querySelectorAll('p, div, span');
-        if (textElements.length > 0) {
-          text = Array.from(textElements)
-            .map(el => el.textContent?.trim())
-            .filter(t => t && t.length > 3) // 더 짧은 텍스트도 허용
-            .join(' ');
-        }
       }
       return text;
     }
@@ -247,45 +93,8 @@ class ChatSiteAdapter {
              node.querySelector('.user-query-bubble-with-background') ||
              node.matches('main[role="main"]') ||
              node.closest('main[role="main"]');
-    } else if (this.hostname.includes('copilot.microsoft.com') || 
-               this.hostname.includes('copilot.cloud.microsoft') ||
-               this.hostname.includes('m365.cloud.microsoft') ||
-               this.hostname.includes('bing.com/chat')) {
-      
-      // M365 Copilot 채팅 관련 노드 판단 개선
-      const chatRelatedSelectors = [
-        '.fai-UserMessage__message',
-        '[id^="user-message-"]',
-        '[data-testid="chatOutput"]',
-        '[data-testid*="conversation"]',
-        '[data-testid*="chat"]',
-        '.user-message',
-        '.human-turn',
-        '[data-role="user"]',
-        '.message',
-        '.chat-message',
-        '.conversation-message',
-        '.user-bubble',
-        '[class*="chat"]',
-        '[class*="message"]',
-        '[class*="conversation"]',
-        'main[role="main"]',
-        '[role="main"]',
-        '.copilot-chat',
-        '.ms-copilot'
-      ];
-      
-      return chatRelatedSelectors.some(selector => {
-        try {
-          return node.matches(selector) || 
-                 node.querySelector(selector) || 
-                 node.closest(selector);
-        } catch (e) {
-          return false;
-        }
-      });
     }
-    
+
     return false;
   }
 
@@ -298,56 +107,6 @@ class ChatSiteAdapter {
       return !!document.querySelector('[data-testid="user-message"]');
     } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
       return !!document.querySelector('.user-query-bubble-with-background');
-    } else if (this.hostname.includes('copilot.microsoft.com') || 
-               this.hostname.includes('copilot.cloud.microsoft') ||
-               this.hostname.includes('m365.cloud.microsoft') ||
-               this.hostname.includes('bing.com/chat')) {
-      
-      // M365 Copilot 채팅 페이지 감지 개선
-      const chatIndicators = [
-        '.fai-UserMessage__message',
-        '[id^="user-message-"]',
-        '[data-testid="chatOutput"]',
-        '.user-message',
-        '.human-turn',
-        '[data-role="user"]',
-        '.message',
-        '.chat-message',
-        '.conversation-message',
-        '.user-bubble',
-        '[data-testid*="chat"]',
-        '[class*="chat"]',
-        'input[type="text"]', // 채팅 입력창
-        'textarea[placeholder*="Ask"]', // Ask Copilot 입력창
-        '[placeholder*="chat" i]',
-        '[placeholder*="message" i]'
-      ];
-      
-      return chatIndicators.some(selector => {
-        try {
-          return !!document.querySelector(selector);
-        } catch (e) {
-          return false;
-        }
-      }) || 
-      // iframe 내부도 확인
-      Array.from(document.querySelectorAll('iframe')).some(iframe => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-          if (iframeDoc) {
-            return chatIndicators.some(selector => {
-              try {
-                return !!iframeDoc.querySelector(selector);
-              } catch (e) {
-                return false;
-              }
-            });
-          }
-        } catch (e) {
-          return false;
-        }
-        return false;
-      });
     }
     return false;
   }
@@ -367,9 +126,6 @@ class OptimizedObserver {
     // SPA 감지를 위한 URL 추적
     this.lastUrl = window.location.href;
     this.urlCheckTimer = null;
-    
-    // M365 Copilot용 특별 처리
-    this.iframeObservers = [];
   }
 
   start() {
@@ -388,10 +144,7 @@ class OptimizedObserver {
 
     // URL 변화 감지 설정
     this.setupUrlWatcher();
-    
-    // M365 Copilot용 iframe 감시 설정
-    this.setupIframeWatchers();
-    
+
     this.isObserving = true;
     debugLog('observer started');
   }
@@ -401,56 +154,12 @@ class OptimizedObserver {
       this.observer.disconnect();
       this.observer = null;
     }
-    
-    // iframe observers 정리
-    this.iframeObservers.forEach(obs => obs.disconnect());
-    this.iframeObservers = [];
-    
+
     this.clearTimers();
     this.cleanupUrlWatcher();
     this.isObserving = false;
     
     debugLog('observer stopped');
-  }
-
-  setupIframeWatchers() {
-    // M365 Copilot의 iframe 감시
-    const watchIframes = () => {
-      const iframes = document.querySelectorAll('iframe');
-      iframes.forEach(iframe => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-          if (iframeDoc && !iframe.dataset.aicusWatched) {
-            iframe.dataset.aicusWatched = 'true';
-            
-            const iframeObserver = new MutationObserver((mutations) => {
-              debugLog('iframe mutation');
-              this.handleMutations(mutations);
-            });
-            
-            iframeObserver.observe(iframeDoc.body || iframeDoc, {
-              childList: true,
-              subtree: true,
-              attributes: false
-            });
-            
-            this.iframeObservers.push(iframeObserver);
-          }
-        } catch (e) {
-          // Cross-origin iframe 접근 불가, 무시
-        }
-      });
-    };
-    
-    // 다시 호출되더라도 타이머가 쌓이지 않도록 기존 타이머 해제
-    clearTimeout(this.iframeInitTimer);
-    clearInterval(this.iframeCheckTimer);
-
-    // 초기 iframe 검사
-    this.iframeInitTimer = setTimeout(watchIframes, 1000);
-
-    // 주기적으로 새로운 iframe 확인
-    this.iframeCheckTimer = setInterval(watchIframes, 5000);
   }
 
   setupUrlWatcher() {
@@ -489,13 +198,7 @@ class OptimizedObserver {
       clearInterval(this.urlCheckTimer);
       this.urlCheckTimer = null;
     }
-    
-    if (this.iframeCheckTimer) {
-      clearInterval(this.iframeCheckTimer);
-      this.iframeCheckTimer = null;
-    }
 
-    clearTimeout(this.iframeInitTimer);
     clearTimeout(this.urlScanTimer);
   }
 
@@ -510,7 +213,6 @@ class OptimizedObserver {
       }
 
       // URL 변경 시 잠시 후 스캔 (DOM 로딩 대기)
-      // iframe 감시는 start()에서 설정한 5초 인터벌이 계속 처리하므로 다시 설정하지 않는다
       clearTimeout(this.urlScanTimer);
       this.urlScanTimer = setTimeout(() => {
         this.forceScan();
@@ -2374,7 +2076,7 @@ createDonationModal() {
 
 // 확장 프로그램 초기화
 (() => {
-  // all_frames: true 이므로 iframe 안에서는 패널을 만들지 않는다
+  // 최상위 프레임에서만 패널 생성 (iframe에 주입되는 경우 대비)
   if (window.top !== window) return;
 
   let aicusNavigator = null;
