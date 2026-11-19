@@ -12,7 +12,7 @@
 ## 버전과 기준선
 - 기본 브랜치는 `master`. 작업 기준선은 master의 마지막 코드 커밋 5e1de7a (manifest 1.1.0, Copilot 지원 추가).
 - 웹스토어 배포본은 1.0.1 = 커밋 d6faf5b (태그 `store-v1.0.1`). 1.1.0은 배포된 적 없음.
-  → 다음 배포 버전은 1.2.0. Copilot 지원(1.1.0에서 추가)은 실사용 검증 전이다.
+  → 다음 배포 버전은 1.2.0. Copilot 지원(1.1.0에서 추가)은 미완성이라 1.2.0에서 제거했다.
 - 개선 전후 비교 기준은 태그 `baseline-v1.1.0`(=5e1de7a).
 - 작업은 `fix/v1.2.0` 브랜치에서 하고, 배포 후 master에 머지한다.
 
@@ -46,6 +46,34 @@
 9. hostname.includes('bing.com/chat')는 항상 false.
 10. isOnChatPage()가 질문 선택자로 판정 → "빈 대화"와 "선택자 고장"을 구분 못 함.
 11. 리사이즈가 height가 아니라 max-height만 변경 + CSS 고정 max-height(300px/250px)와 JS updateContentHeight()가 충돌.
+
+## v1.2.0 진행 결과 (2026-11-19, 브랜치 fix/v1.2.0)
+### 알려진 문제 처리
+| # | 상태 | 커밋 / 근거 |
+|---|---|---|
+| 1 중복 패널 | 해결 | c3b37cb (최상위 프레임만 + 기존 패널 제거) |
+| 2 인터벌 누수 | 해결 | cd94c50 |
+| 3 pushState 패치 무효 | 해결 | cd94c50 삭제 → c1b996e Navigation API(`currententrychange`, isolated world에서 동작 실측) + 2초 폴링 fallback |
+| 4 스로틀 | 유지 (측정상 문제 없음) | 답변 20초 동안 scan 2회 (Claude/ChatGPT/Gemini 실측). 턴 단위 변화만 감시(94a889d)해서 스트리밍 중 스캔 없음 → 디바운스 불필요 |
+| 5 넓은 관련 노드 판정 | 유지 (측정상 문제 없음) | SITES.relevantWithin에 남아 있으나 위 측정에서 스트리밍 중 스캔 없음 |
+| 6 정렬/innerHTML 재생성 | 일부 | Claude/ChatGPT는 저장된 y로 정렬, 바뀐 경우만 재렌더(b92cd59, cda9e64). Gemini 경로는 기존 방식 |
+| 7 escapeHtml 따옴표 | 해결 | f960669 |
+| 8, 9 Copilot | 해결(제거) | 31e2618: Copilot 지원 전체 삭제(미완성·미검증). manifest 주소/all_frames 제거, 모든 사이트에서 돌던 5초 iframe 감시도 삭제 |
+| 10 isOnChatPage | 일부 | 0161ff2: hasQuestionElements로 이름 변경, 빈 목록 문구 "아직 질문이 없어요". 빈 대화/선택자 고장 구분은 v1.3.0 selfCheck |
+| 11 리사이즈 | 해결 | bdd01af (height 기준 통일) |
+
+### 추가 실측 (Phase 1~2)
+- ChatGPT 질문 선택자: `[data-user-message-bubble="true"]`, 이전 대화의 질문을 숨긴 채 남겨둠 → `checkVisibility()`로 보이는 것만 사용
+- Claude/ChatGPT 모두 가상화. 턴마다 `data-turn-key`(UUID)가 있어 누적 목록의 키로 사용
+- Claude 긴 대화는 맨 위에 닿아야 이전 메시지를 서버에서 받아 위에 붙임(높이 14565→30432) → 전체 불러오기는 맨 위에서 1초간 변화 없을 때까지 대기(ebff565)
+- 위쪽 턴이 빠졌는지 판정: 스크롤 영역 맨 위~첫 턴 간격. 전부 그려짐 81px / 가상화 7433~13172px
+- Gemini 질문 텍스트에 숨김 제목 `h5.cdk-visually-hidden`("말씀하신 내용 ...") 포함 → 제외
+
+### 구조
+- 사이트별 선택자는 파일 맨 위 `SITES` 설정에만 있음(0186548). 사이트 화면이 바뀌면 해당 항목과 selectorVersion만 수정
+- 디버그: 사이트 콘솔에서 `localStorage.aicusDebug = '1'` 후 새로고침 → `[aicus-debug]` 로그(개수/시간만). 끄기 `localStorage.removeItem('aicusDebug')`. 배포본에도 숨은 스위치로 유지(일반 사용자에게는 출력 없음, 문의 대응용)
+- 추가 기능: 탭 안에서 대화별 목록 기억, ⇅ 전체 질문 불러오기(진행 막대/중단/재시도 안내), 고른 색을 사이트 localStorage(`aicusAccentColor`)에 저장
+- manifest 1.2.0, 권한은 기존 `activeTab`만 (추가 없음)
 
 ## 작업 규칙 (반드시 지킬 것)
 - manifest에 새 permissions / host_permissions 를 추가하지 않는다. (경고가 뜨는 권한을 추가하면 업데이트 시 사용자 동의 전까지 확장이 비활성화됨)
