@@ -10,29 +10,90 @@ const debugLog = (label, data) => {
   else console.log(`[aicus-debug] ${label}`, JSON.stringify(data));
 };
 
-// ===== 1. 사이트별 어댑터 시스템 =====
-class ChatSiteAdapter {
-  constructor() {
-    this.hostname = window.location.hostname;
-  }
+// ===== 1. 사이트별 설정 =====
+// 사이트 화면이 바뀌면 해당 사이트 항목만 고친다 (선택자는 실측값만 사용, selectorVersion도 함께 올림)
+//   match:          hostname 판별
+//   userMessage:    질문 요소 선택자
+//   visibleOnly:    숨겨진 질문 요소 제외 여부
+//   turns:          대화 턴(TURN_KEY_ATTR) 단위로 그려지는 사이트인지 (가상화 → 누적 목록 사용)
+//   relevantWithin: 이 영역 안의 변화도 다시 스캔할 변화로 봄
+//   findUserMessages: (선택) 질문 요소를 찾는 방식이 다를 때만
+//   extract:        질문 요소 → 질문 텍스트
 
-  getUserMessages() {
-    if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      // ChatGPT는 다른 대화로 이동해도 이전 대화의 질문을 숨긴 채 DOM에 남겨두므로 보이는 것만 사용
-      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'))
-        .filter(el => this.isElementVisible(el));
-    } else if (this.hostname.includes('claude.ai')) {
-      return Array.from(document.querySelectorAll('[data-testid="user-message"]'));
-    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
-      const root = document.querySelector('main[role="main"]') || 
-                   document.querySelector('[aria-label="Chat history"]') || 
+// 대화 턴 키 (Claude, ChatGPT 실측 공통): 질문/답변 턴마다 붙는 고유 UUID
+const TURN_KEY_ATTR = 'data-turn-key';
+
+const SITES = {
+  chatgpt: {
+    match: h => h.includes('openai.com') || h.includes('chatgpt.com'),
+    selectorVersion: '2026.11.1',
+    userMessage: '[data-user-message-bubble="true"]',
+    // 다른 대화로 이동해도 이전 대화의 질문을 숨긴 채 DOM에 남겨두므로 보이는 것만 사용
+    visibleOnly: true,
+    turns: true,
+    relevantWithin: '[data-testid*="conversation"]',
+    extract: el => el.textContent?.trim()
+  },
+  claude: {
+    match: h => h.includes('claude.ai'),
+    selectorVersion: '2026.11.1',
+    userMessage: '[data-testid="user-message"]',
+    visibleOnly: false,
+    turns: true,
+    relevantWithin: '[data-testid*="conversation"]',
+    extract: el => {
+      const p = el.querySelector('p.whitespace-pre-wrap');
+      return p ? p.textContent?.trim() : el.textContent?.trim();
+    }
+  },
+  gemini: {
+    match: h => h.includes('gemini.google.com') || h.includes('bard.google.com'),
+    selectorVersion: '2026.11.1',
+    userMessage: '.user-query-bubble-with-background',
+    visibleOnly: false,
+    turns: false,
+    relevantWithin: 'main[role="main"]',
+    // 말풍선 안의 질문 텍스트 요소를 사용 (없으면 말풍선 자체)
+    findUserMessages() {
+      const root = document.querySelector('main[role="main"]') ||
+                   document.querySelector('[aria-label="Chat history"]') ||
                    document.body;
-      const bubbles = Array.from(root.querySelectorAll('.user-query-bubble-with-background'));
+      const bubbles = Array.from(root.querySelectorAll(this.userMessage));
       return bubbles.map(bubble =>
         bubble.querySelector('.query-text-line, .query-text.gds-body-l, [id^="user-query-content-"] > span') || bubble
       ).filter((el, index, arr) => arr.indexOf(el) === index);
+    },
+    // 화면낭독기용 숨김 제목(h5.cdk-visually-hidden: "말씀하신 내용 " + 질문 앞부분)을 제외하고 추출
+    extract: el => {
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('.cdk-visually-hidden').forEach(h => h.remove());
+      let text = clone.textContent?.trim();
+      if (!text) {
+        const textElements = clone.querySelectorAll('p, div, span');
+        text = Array.from(textElements)
+          .map(t => t.textContent?.trim())
+          .filter(t => t && t.length > 5)
+          .join(' ');
+      }
+      return text;
     }
-    return [];
+  }
+};
+
+// ===== 1-1. 사이트 어댑터: SITES 설정을 읽어 동작 =====
+class ChatSiteAdapter {
+  constructor() {
+    this.hostname = window.location.hostname;
+    this.siteId = Object.keys(SITES).find(id => SITES[id].match(this.hostname)) || null;
+    this.site = this.siteId ? SITES[this.siteId] : null;
+  }
+
+  getUserMessages() {
+    const site = this.site;
+    if (!site) return [];
+    if (site.findUserMessages) return site.findUserMessages();
+    const elements = Array.from(document.querySelectorAll(site.userMessage));
+    return site.visibleOnly ? elements.filter(el => this.isElementVisible(el)) : elements;
   }
 
   // display:none 등으로 숨겨진 요소 제외 (checkVisibility 미지원 브라우저는 offsetParent로 판정)
@@ -43,73 +104,36 @@ class ChatSiteAdapter {
   }
 
   extractText(container) {
-    if (this.hostname.includes('claude.ai')) {
-      const pElement = container.querySelector('p.whitespace-pre-wrap');
-      return pElement ? pElement.textContent?.trim() : container.textContent?.trim();
-    } else if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return container.textContent?.trim();
-    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
-      // 화면낭독기용 숨김 제목(h5.cdk-visually-hidden: "말씀하신 내용 " + 질문 앞부분)을 제외하고 추출
-      const clone = container.cloneNode(true);
-      clone.querySelectorAll('.cdk-visually-hidden').forEach(el => el.remove());
-      let text = clone.textContent?.trim();
-      if (!text) {
-        const textElements = clone.querySelectorAll('p, div, span');
-        text = Array.from(textElements)
-          .map(el => el.textContent?.trim())
-          .filter(t => t && t.length > 5)
-          .join(' ');
-      }
-      return text;
-    }
-    return container.textContent?.trim() || '';
+    return this.site ? this.site.extract(container) : (container.textContent?.trim() || '');
   }
 
   // 대화 턴(질문 또는 답변) 자체가 그려지거나 빠졌는지: 긴 대화는 처음에 답변 턴만 그려지므로
-  // 질문뿐 아니라 턴 단위 변화에도 다시 스캔해야 함 (Claude/ChatGPT 실측 속성)
+  // 질문뿐 아니라 턴 단위 변화에도 다시 스캔해야 함
   // 턴 "안쪽" 변화(답변 생성 중 글자 추가)는 포함하지 않음 → 스트리밍 중 스캔이 늘지 않음
   isTurnNode(node) {
-    return node.matches('[data-turn-key]') || !!node.querySelector('[data-turn-key]');
+    return node.matches(`[${TURN_KEY_ATTR}]`) || !!node.querySelector(`[${TURN_KEY_ATTR}]`);
   }
 
-  // 채팅 관련 노드인지 정밀하게 판단
+  // 다시 스캔해야 할 변화인지: 질문 요소 / 턴 단위 추가·삭제 / relevantWithin 영역 안 변화
   isRelevantChatNode(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
-    
-    if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return node.matches('[data-user-message-bubble="true"]') ||
-             node.querySelector('[data-user-message-bubble="true"]') ||
-             this.isTurnNode(node) ||
-             node.matches('[data-testid*="conversation"]') ||
-             node.closest('[data-testid*="conversation"]');
-    } else if (this.hostname.includes('claude.ai')) {
-      return node.matches('[data-testid="user-message"]') ||
-             node.querySelector('[data-testid="user-message"]') ||
-             this.isTurnNode(node) ||
-             node.matches('[data-testid*="conversation"]') ||
-             node.closest('[data-testid*="conversation"]');
-    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
-      return node.matches('.user-query-bubble-with-background') ||
-             node.querySelector('.user-query-bubble-with-background') ||
-             node.matches('main[role="main"]') ||
-             node.closest('main[role="main"]');
-    }
-
-    return false;
+    const site = this.site;
+    if (!site) return false;
+    return node.matches(site.userMessage) ||
+           !!node.querySelector(site.userMessage) ||
+           (site.turns && this.isTurnNode(node)) ||
+           !!node.closest(site.relevantWithin); // closest는 자기 자신도 포함
   }
 
   // 질문 요소가 하나라도 있는지 (목록이 비었을 때 안내 문구 선택용)
   // 새 대화 / 로딩 중 / 선택자 고장은 구분하지 않음 → 구분은 v1.3.0 selfCheck에서
   hasQuestionElements() {
-    if (this.hostname.includes('openai.com') || this.hostname.includes('chatgpt.com')) {
-      return Array.from(document.querySelectorAll('[data-user-message-bubble="true"]'))
-        .some(el => this.isElementVisible(el));
-    } else if (this.hostname.includes('claude.ai')) {
-      return !!document.querySelector('[data-testid="user-message"]');
-    } else if (this.hostname.includes('gemini.google.com') || this.hostname.includes('bard.google.com')) {
-      return !!document.querySelector('.user-query-bubble-with-background');
-    }
-    return false;
+    const site = this.site;
+    if (!site) return false;
+    const elements = document.querySelectorAll(site.userMessage);
+    return site.visibleOnly
+      ? Array.from(elements).some(el => this.isElementVisible(el))
+      : elements.length > 0;
   }
 }
 
@@ -377,7 +401,7 @@ class AicusNavigator {
       ms: Math.round(performance.now() - (this.navAt || 0)),
       user: this.adapter.getUserMessages().length,
       turns: this.getRenderedTurns().length,
-      turnsAll: document.querySelectorAll('[data-turn-key]').length,
+      turnsAll: document.querySelectorAll(`[${TURN_KEY_ATTR}]`).length,
       map: this.questionMap.size,
       list: this.questions.length
     });
@@ -432,14 +456,14 @@ class AicusNavigator {
   }
 
   getTurnKey(el) {
-    const row = el.closest('[data-turn-key]');
-    return row ? row.getAttribute('data-turn-key') : null;
+    const row = el.closest(`[${TURN_KEY_ATTR}]`);
+    return row ? row.getAttribute(TURN_KEY_ATTR) : null;
   }
 
   // 지금 그려져 있는 대화 턴(질문+답변, 바깥쪽 것만). Claude/ChatGPT에서 측정 확인
   getRenderedTurns() {
-    return [...document.querySelectorAll('[data-turn-key]')]
-      .filter(t => !t.parentElement || !t.parentElement.closest('[data-turn-key]'))
+    return [...document.querySelectorAll(`[${TURN_KEY_ATTR}]`)]
+      .filter(t => !t.parentElement || !t.parentElement.closest(`[${TURN_KEY_ATTR}]`))
       // ChatGPT는 New Chat 후에도 이전 대화 턴을 숨긴 채 남겨 두므로 보이는 것만
       .filter(t => this.adapter.isElementVisible(t));
   }
@@ -1512,7 +1536,7 @@ class AicusNavigator {
 
     // 고정 시간만 기다리면 처음 여는 긴 대화처럼 그리기가 느릴 때 안 그려진 구간을 지나쳐 질문이 빠짐.
     // 그래서 (a) 화면이 다 그려질 때까지 기다리고 (b) 이전 화면과 이어지는지 대화 턴 키로 확인한다.
-    const turnKeys = () => this.getRenderedTurns().map(t => t.getAttribute('data-turn-key'));
+    const turnKeys = () => this.getRenderedTurns().map(t => t.getAttribute(TURN_KEY_ATTR));
     const covered = new Set(); // 지금까지 읽은 턴 키
     const collect = () => {
       this.mergeKeyedQuestions(this.adapter.getUserMessages());
