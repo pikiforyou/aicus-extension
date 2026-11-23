@@ -223,6 +223,9 @@ const createStarStore = () => {
   };
 };
 
+// 꼭짓점이 둥근 별 아이콘 (Lucide "star", ISC 라이선스). 켜짐/꺼짐은 CSS의 채우기 색으로만 구분
+const STAR_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>';
+
 // 키가 없는 사이트(Gemini)용: 질문 텍스트 → 짧은 해시 (FNV-1a 32bit, 텍스트 복원 불가)
 const hashText = (text) => {
   let h = 0x811c9dc5;
@@ -801,7 +804,7 @@ class AicusNavigator {
       const starred = this.stars.has(conv, this.getStarKey(question));
       return `
       <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
-        <button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${starred ? '★' : '☆'}</button>
+        <button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${STAR_ICON}</button>
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
     `;
@@ -821,7 +824,6 @@ class AicusNavigator {
         btn.classList.toggle('on', on);
         btn.setAttribute('aria-pressed', String(on));
         btn.title = on ? '별표 해제' : '별표';
-        btn.textContent = on ? '★' : '☆';
       });
 
       item.addEventListener('click', () => {
@@ -1118,41 +1120,53 @@ class AicusNavigator {
         background: var(--hover-bg-dark);
       }
 
+      /* 별: 꺼짐 = 연한 회색 테두리만, 켜짐 = 파스텔 노랑 채움 + 조금 진한 테두리 */
       .star-btn {
         flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         width: 20px;
         height: 20px;
         padding: 0;
         border: none;
         background: none;
         cursor: pointer;
-        font-size: 15px;
-        line-height: 20px;
-        color: #c4c4c4;
-        transition: color 0.15s ease, transform 0.15s ease;
+        transition: transform 0.15s ease;
+      }
+
+      .star-btn svg {
+        fill: transparent;
+        stroke: #d4d4d8;
+        transition: fill 0.15s ease, stroke 0.15s ease;
       }
 
       .star-btn:hover {
-        color: #9ca3af;
-        transform: scale(1.15);
+        transform: scale(1.12);
       }
 
-      .star-btn.on,
-      .star-btn.on:hover {
-        color: #f5b301;
+      .star-btn:hover svg {
+        stroke: #b8b8c0;
       }
 
-      .dark .star-btn {
-        color: #5b6473;
+      .star-btn.on svg,
+      .star-btn.on:hover svg {
+        fill: #ffe29a;
+        stroke: #f2c46d;
       }
 
-      .dark .star-btn:hover {
-        color: #8b95a5;
+      .dark .star-btn svg {
+        stroke: #545b68;
       }
 
-      .dark .star-btn.on,
-      .dark .star-btn.on:hover {
-        color: #fbbf24;
+      .dark .star-btn:hover svg {
+        stroke: #7c8494;
+      }
+
+      .dark .star-btn.on svg,
+      .dark .star-btn.on:hover svg {
+        fill: #f3d98b;
+        stroke: #e0bd62;
       }
 
       .question-text {
