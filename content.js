@@ -19,6 +19,10 @@ const debugLog = (label, data) => {
 //   relevantWithin: 이 영역 안의 변화도 다시 스캔할 변화로 봄
 //   findUserMessages: (선택) 질문 요소를 찾는 방식이 다를 때만
 //   extract:        질문 요소 → 질문 텍스트
+// 사이트마다 다른 동작은 아래 항목으로만 둔다 (없으면 공통 기본 동작, 다른 사이트에 영향 없음)
+//   findRenamedKey: (선택) 처음 보는 턴 키가 기존 질문의 키가 바뀐 것인지 판정 → 기존 키 또는 null
+//   topLoad:        (선택) 전체 불러오기 때 맨 위에서 이전 메시지를 받아오는 방식
+//                   { wheel: 위로 휠 신호 보낼지, waitMs: 변화 기다리는 시간, maxMs: 맨 위 단계 최대 시간 }
 
 // 대화 턴 키 (Claude, ChatGPT 실측 공통): 질문/답변 턴마다 붙는 고유 UUID
 const TURN_KEY_ATTR = 'data-turn-key';
@@ -31,10 +35,19 @@ const SITES = {
     // 다른 대화로 이동해도 이전 대화의 질문을 숨긴 채 DOM에 남겨두므로 보이는 것만 사용
     visibleOnly: true,
     turns: true,
-    // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
-    wheelAtTop: true,
     relevantWithin: '[data-testid*="conversation"]',
-    extract: el => el.textContent?.trim()
+    extract: el => el.textContent?.trim(),
+    // 답변 생성 중 같은 질문의 턴 키가 1~2번 바뀌고 질문 요소도 새로 만들어짐 (실측)
+    // candidates: 지금 화면에 없는 기존 항목들 [{ key, text, element }]
+    // 같은 요소를 우선, 없으면 같은 텍스트이면서 요소가 DOM에서 빠진 항목
+    findRenamedKey(el, text, candidates) {
+      const sameEl = candidates.find(q => q.element === el);
+      if (sameEl) return sameEl.key;
+      const sameText = candidates.filter(q => q.text === text && (!q.element || !q.element.isConnected));
+      return sameText.length ? sameText[sameText.length - 1].key : null;
+    },
+    // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
+    topLoad: { wheel: true, waitMs: 3000, maxMs: 40000 }
   },
   claude: {
     match: h => h.includes('claude.ai'),
@@ -46,7 +59,9 @@ const SITES = {
     extract: el => {
       const p = el.querySelector('p.whitespace-pre-wrap');
       return p ? p.textContent?.trim() : el.textContent?.trim();
-    }
+    },
+    // 맨 위에 닿으면 스스로 이전 메시지를 받아와 위에 붙임 → 1초 변화 없을 때까지 대기 (실측)
+    topLoad: { wheel: false, waitMs: 1000, maxMs: 20000 }
   },
   gemini: {
     match: h => h.includes('gemini.google.com') || h.includes('bard.google.com'),
@@ -553,30 +568,24 @@ class AicusNavigator {
     let lastIdx = -1;
     let scroller = null;
     let renderedKeys = null;
+    const findRenamedKey = this.adapter.site?.findRenamedKey;
 
     userMessages.forEach(el => {
-      let key = this.getTurnKey(el);
+      const key = this.getTurnKey(el);
       if (!key) return;
       const text = this.adapter.extractText(el);
       if (!text || !this.isValidQuestion(text)) return;
 
-      // ChatGPT는 답변 생성 중 같은 질문의 턴 키를 바꾼다 → 새 질문으로 추가하지 않고 기존 항목의 키만 교체
-      if (!this.questionMap.has(key)) {
+      // 키가 바뀌는 사이트(ChatGPT)만: 새 질문으로 추가하지 않고 기존 항목의 키만 교체
+      // 처음 보는 키일 때만 실행되므로 평소 스캔 비용은 늘지 않음
+      if (findRenamedKey && this.questionMap.size > 0 && !this.questionMap.has(key)) {
         if (!renderedKeys) renderedKeys = new Set(userMessages.map(m => this.getTurnKey(m)));
-        // 지금 화면에 없는 기존 항목 중: 같은 요소(속성만 바뀜)를 우선, 없으면 같은 텍스트이면서 요소가 DOM에서 빠진 것
-        const candidates = this.questionOrder.filter(k => !renderedKeys.has(k));
-        const sameEl = candidates.find(k => this.questionMap.get(k)?.element === el);
-        const sameText = candidates.filter(k => {
-          const q = this.questionMap.get(k);
-          return q && q.text === text && (!q.element || !q.element.isConnected);
-        });
-        const oldKey = sameEl || sameText[sameText.length - 1];
-        if (this.questionMap.size > 0) {
-          debugLog('new turn key', {
-            sameEl: !!sameEl, sameText: sameText.length, renamed: !!oldKey,
-            map: this.questionMap.size, rendered: userMessages.length
-          });
-        }
+        const candidates = this.questionOrder
+          .filter(k => !renderedKeys.has(k))
+          .map(k => this.questionMap.get(k))
+          .filter(Boolean);
+        const oldKey = findRenamedKey(el, text, candidates);
+        debugLog('new turn key', { renamed: !!oldKey, map: this.questionMap.size, rendered: userMessages.length });
         if (oldKey) this.renameQuestionKey(oldKey, key);
       }
 
@@ -1633,21 +1642,18 @@ class AicusNavigator {
 
     const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
 
-    // 1) 맨 위로: Claude는 맨 위에 닿으면 이전 메시지를 서버에서 더 받아와 위에 붙임
-    //    (실측: 높이 14565→30432, 같은 만큼 위치도 밀림 = 위쪽에 내용 추가 + 스크롤 위치 유지)
-    //    → 맨 위에서 1초 동안 높이·위치 변화가 없을 때까지 다시 올라가며 기다림 (최대 20초)
-    //    ChatGPT는 맨 위에서 위로 휠 입력이 있어야 이전 메시지를 몇 개씩 불러옴(실측 약 1.4초 후)
-    //    → 휠 신호를 보내고 3초까지 기다림 (최대 40초)
-    const wheelAtTop = !!this.adapter.site?.wheelAtTop;
-    const topWaitSteps = wheelAtTop ? 30 : 10;
+    // 1) 맨 위로: 맨 위에서 이전 메시지가 위에 붙으면(높이 증가 또는 위치 밀림) 다시 올라가며
+    //    변화가 없을 때까지 반복. 받아오는 방식과 대기 시간은 사이트 설정(SITES.*.topLoad)
+    const topLoad = { wheel: false, waitMs: 1000, maxMs: 20000, ...this.adapter.site?.topLoad };
+    const topWaitSteps = Math.ceil(topLoad.waitMs / 100);
     const goTop = async (pass) => {
       covered.clear();
       const started = Date.now();
-      while (stillValid() && Date.now() - started < (wheelAtTop ? 40000 : 20000)) {
+      while (stillValid() && Date.now() - started < topLoad.maxMs) {
         const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
         const settleMs = await settle(far);
-        if (wheelAtTop) {
+        if (topLoad.wheel) {
           // 측정 때와 같게 150ms 간격으로 여러 번 보냄
           for (let i = 0; i < 5 && stillValid(); i++) {
             scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
