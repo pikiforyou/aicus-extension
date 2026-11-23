@@ -49,7 +49,8 @@ const SITES = {
       return sameText.length ? sameText[sameText.length - 1].key : null;
     },
     // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
-    topLoad: { wheel: true, waitMs: 3000, maxMs: 40000 },
+    // waitMs는 첫 휠 신호부터 잼 (실측 1.4초의 약 1.8배)
+    topLoad: { wheel: true, waitMs: 2500, maxMs: 40000 },
     // 이전 메시지를 아예 안 받아온 상태라 위쪽 빈 공간으로 판정할 수 없음 (실측: 11개 중 5개만, 빈 공간 없음)
     moreAbove: 'untilLoaded'
   },
@@ -1681,7 +1682,6 @@ class AicusNavigator {
     // 1) 맨 위로: 맨 위에서 이전 메시지가 위에 붙으면(높이 증가 또는 위치 밀림) 다시 올라가며
     //    변화가 없을 때까지 반복. 받아오는 방식과 대기 시간은 사이트 설정(SITES.*.topLoad)
     const topLoad = { wheel: false, waitMs: 1000, maxMs: 20000, ...this.adapter.site?.topLoad };
-    const topWaitSteps = Math.ceil(topLoad.waitMs / 100);
     const goTop = async (pass) => {
       covered.clear();
       const started = Date.now();
@@ -1689,17 +1689,20 @@ class AicusNavigator {
         const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
         const settleMs = await settle(far);
-        if (topLoad.wheel) {
-          // 측정 때와 같게 150ms 간격으로 여러 번 보냄
-          for (let i = 0; i < 5 && stillValid(); i++) {
-            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
-            await wait(150);
-          }
-        }
+        // waitMs 동안 변화 감시. 휠 신호는 측정 때처럼 150ms 간격 최대 5번 보내되,
+        // 이전 메시지가 붙는 즉시 다음 단계로 넘어감 (휠을 다 보낼 때까지 기다리지 않음)
         const h0 = scroller.scrollHeight;
+        const waitStart = Date.now();
         let grew = false;
-        for (let i = 0; i < topWaitSteps && stillValid(); i++) {
-          await wait(100);
+        let wheels = 0;
+        let lastWheel = 0;
+        while (stillValid() && Date.now() - waitStart < topLoad.waitMs) {
+          if (topLoad.wheel && wheels < 5 && Date.now() - lastWheel >= 150) {
+            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+            wheels++;
+            lastWheel = Date.now();
+          }
+          await wait(50);
           if (scroller.scrollHeight !== h0 || scroller.scrollTop > 2) { grew = true; break; }
         }
         snapshot({ phase: 'top', pass, settleMs, grew });
