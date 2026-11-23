@@ -561,13 +561,21 @@ class AicusNavigator {
       // ChatGPT는 답변 생성 중 같은 질문의 턴 키를 바꾼다 → 새 질문으로 추가하지 않고 기존 항목의 키만 교체
       if (!this.questionMap.has(key)) {
         if (!renderedKeys) renderedKeys = new Set(userMessages.map(m => this.getTurnKey(m)));
-        const oldKey = this.questionOrder[lastIdx + 1];
-        const old = oldKey && this.questionMap.get(oldKey);
-        if (old && old.text === text && !renderedKeys.has(oldKey) &&
-            (old.element === el || !old.element || !old.element.isConnected)) {
-          this.renameQuestionKey(oldKey, key);
-          debugLog('turn key changed');
+        // 지금 화면에 없는 기존 항목 중: 같은 요소(속성만 바뀜)를 우선, 없으면 같은 텍스트이면서 요소가 DOM에서 빠진 것
+        const candidates = this.questionOrder.filter(k => !renderedKeys.has(k));
+        const sameEl = candidates.find(k => this.questionMap.get(k)?.element === el);
+        const sameText = candidates.filter(k => {
+          const q = this.questionMap.get(k);
+          return q && q.text === text && (!q.element || !q.element.isConnected);
+        });
+        const oldKey = sameEl || sameText[sameText.length - 1];
+        if (this.questionMap.size > 0) {
+          debugLog('new turn key', {
+            sameEl: !!sameEl, sameText: sameText.length, renamed: !!oldKey,
+            map: this.questionMap.size, rendered: userMessages.length
+          });
         }
+        if (oldKey) this.renameQuestionKey(oldKey, key);
       }
 
       const prev = this.questionMap.get(key);
