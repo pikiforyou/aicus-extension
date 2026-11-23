@@ -159,6 +159,80 @@ class ChatSiteAdapter {
   }
 }
 
+// ===== 1-2. 별표 저장소 =====
+// 사이트 localStorage 'aicusStars' = { 대화 경로: [질문 키, ...] } — 질문 텍스트는 저장하지 않음
+// 저장소를 쓸 수 없으면(차단 등) 이번 화면에서만 기억
+const STAR_STORAGE_KEY = 'aicusStars';
+const STAR_MAX_CONVERSATIONS = 300; // 오래된 대화부터 정리
+
+const createStarStore = () => {
+  let data = {};
+  let storageOk = false;
+
+  // 다른 탭에서 바꾼 내용을 덮어쓰지 않도록 바꾸기 직전마다 다시 읽음
+  const load = () => {
+    let raw;
+    try {
+      raw = localStorage.getItem(STAR_STORAGE_KEY);
+      storageOk = true;
+    } catch (e) {
+      return; // 저장소 차단: 메모리 값 유지
+    }
+    try {
+      const parsed = JSON.parse(raw || '{}');
+      data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+      data = {}; // 깨진 값은 버리고 새로 시작
+    }
+  };
+  const save = () => {
+    if (!storageOk) return;
+    try {
+      localStorage.setItem(STAR_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      // 저장 실패(용량 초과 등): 이번 화면에서만 유지
+    }
+  };
+
+  load();
+  return {
+    has(conv, key) {
+      return Array.isArray(data[conv]) && data[conv].includes(key);
+    },
+    // 켜고 끄기 → 바뀐 상태(true = 켜짐)
+    toggle(conv, key) {
+      load();
+      const list = Array.isArray(data[conv]) ? data[conv] : [];
+      const on = !list.includes(key);
+      const next = on ? [...list, key] : list.filter(k => k !== key);
+      delete data[conv]; // 최근에 쓴 대화를 뒤로 보내 오래된 것부터 정리
+      if (next.length) data[conv] = next;
+      const convs = Object.keys(data);
+      while (convs.length > STAR_MAX_CONVERSATIONS) delete data[convs.shift()];
+      save();
+      return on;
+    },
+    // 질문 키가 바뀐 경우(ChatGPT) 별표도 따라감
+    rename(conv, oldKey, newKey) {
+      if (!this.has(conv, oldKey)) return;
+      load();
+      const list = Array.isArray(data[conv]) ? data[conv] : [];
+      data[conv] = list.map(k => (k === oldKey ? newKey : k));
+      save();
+    }
+  };
+};
+
+// 키가 없는 사이트(Gemini)용: 질문 텍스트 → 짧은 해시 (FNV-1a 32bit, 텍스트 복원 불가)
+const hashText = (text) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return 'h' + (h >>> 0).toString(36);
+};
+
 // ===== 2. 최적화된 MutationObserver =====
 class OptimizedObserver {
   constructor(callback, adapter) {
@@ -387,6 +461,9 @@ class AicusNavigator {
 
     // 고른 색 기억 (사이트 localStorage, 사이트별로 따로 저장됨)
     this.restoreAccentColor();
+
+    // 별표 (사이트 localStorage, 대화 경로 + 질문 키만 저장)
+    this.stars = createStarStore();
 
     // 어댑터 초기화
     this.adapter = new ChatSiteAdapter();
@@ -628,6 +705,17 @@ class AicusNavigator {
     this.questionMap.set(newKey, { ...entry, key: newKey });
     const idx = this.questionOrder.indexOf(oldKey);
     if (idx !== -1) this.questionOrder[idx] = newKey;
+    this.stars.rename(this.getConversationId(), oldKey, newKey);
+  }
+
+  // 별표를 대화별로 나누는 기준: 주소의 경로 (예: /c/<id>, /chat/<id>, /app/<id>)
+  getConversationId() {
+    return window.location.pathname;
+  }
+
+  // 별표용 질문 키: 턴 키가 있으면 그대로(Claude, ChatGPT), 없으면 텍스트 해시(Gemini)
+  getStarKey(question) {
+    return question.key || hashText(question.fullText || question.text || '');
   }
 
   buildKeyedQuestions() {
@@ -708,16 +796,34 @@ class AicusNavigator {
       return;
     }
 
-    const questionsHTML = this.questions.map(question => `
+    const conv = this.getConversationId();
+    const questionsHTML = this.questions.map(question => {
+      const starred = this.stars.has(conv, this.getStarKey(question));
+      return `
       <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
+        <button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${starred ? '★' : '☆'}</button>
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     content.innerHTML = questionsHTML;
 
     // 이벤트 추가
     content.querySelectorAll('.question-item').forEach(item => {
+      // 별: 켜고 끄기만 하고 질문으로 이동하지 않음. 목록 전체를 다시 그리지 않고 이 버튼만 바꿈
+      item.querySelector('.star-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const question = this.questions.find(q => q.index === parseInt(item.dataset.index));
+        if (!question) return;
+        const on = this.stars.toggle(this.getConversationId(), this.getStarKey(question));
+        const btn = e.currentTarget;
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-pressed', String(on));
+        btn.title = on ? '별표 해제' : '별표';
+        btn.textContent = on ? '★' : '☆';
+      });
+
       item.addEventListener('click', () => {
         const index = parseInt(item.dataset.index);
         const question = this.questions.find(q => q.index === index);
@@ -989,7 +1095,10 @@ class AicusNavigator {
       }
 
       .question-item {
-        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 16px 12px 10px;
         border-bottom: 1px solid var(--border-color);
         cursor: pointer;
         transition: all 0.2s ease;
@@ -1009,7 +1118,46 @@ class AicusNavigator {
         background: var(--hover-bg-dark);
       }
 
+      .star-btn {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 15px;
+        line-height: 20px;
+        color: #c4c4c4;
+        transition: color 0.15s ease, transform 0.15s ease;
+      }
+
+      .star-btn:hover {
+        color: #9ca3af;
+        transform: scale(1.15);
+      }
+
+      .star-btn.on,
+      .star-btn.on:hover {
+        color: #f5b301;
+      }
+
+      .dark .star-btn {
+        color: #5b6473;
+      }
+
+      .dark .star-btn:hover {
+        color: #8b95a5;
+      }
+
+      .dark .star-btn.on,
+      .dark .star-btn.on:hover {
+        color: #fbbf24;
+      }
+
       .question-text {
+        flex: 1;
+        min-width: 0;
         font-size: 13px;
         line-height: 1.4;
         color: #333;
