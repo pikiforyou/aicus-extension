@@ -550,12 +550,25 @@ class AicusNavigator {
     let changed = false;
     let lastIdx = -1;
     let scroller = null;
+    let renderedKeys = null;
 
     userMessages.forEach(el => {
-      const key = this.getTurnKey(el);
+      let key = this.getTurnKey(el);
       if (!key) return;
       const text = this.adapter.extractText(el);
       if (!text || !this.isValidQuestion(text)) return;
+
+      // ChatGPT는 답변 생성 중 같은 질문의 턴 키를 바꾼다 → 새 질문으로 추가하지 않고 기존 항목의 키만 교체
+      if (!this.questionMap.has(key)) {
+        if (!renderedKeys) renderedKeys = new Set(userMessages.map(m => this.getTurnKey(m)));
+        const oldKey = this.questionOrder[lastIdx + 1];
+        const old = oldKey && this.questionMap.get(oldKey);
+        if (old && old.text === text && !renderedKeys.has(oldKey) &&
+            (old.element === el || !old.element || !old.element.isConnected)) {
+          this.renameQuestionKey(oldKey, key);
+          debugLog('turn key changed');
+        }
+      }
 
       const prev = this.questionMap.get(key);
       if (!prev || prev.text !== text) changed = true;
@@ -582,6 +595,15 @@ class AicusNavigator {
     });
 
     return changed;
+  }
+
+  // 같은 질문의 키가 바뀐 경우: 목록 위치와 저장 상태를 그대로 두고 키만 교체
+  renameQuestionKey(oldKey, newKey) {
+    const entry = this.questionMap.get(oldKey);
+    this.questionMap.delete(oldKey);
+    this.questionMap.set(newKey, { ...entry, key: newKey });
+    const idx = this.questionOrder.indexOf(oldKey);
+    if (idx !== -1) this.questionOrder[idx] = newKey;
   }
 
   buildKeyedQuestions() {
