@@ -467,6 +467,9 @@ class AicusNavigator {
 
     // 별표 (사이트 localStorage, 대화 경로 + 질문 키만 저장)
     this.stars = createStarStore();
+    // 즐겨찾기 기능 사용 여부 (기본 꺼짐: 원래 쓰던 목록 그대로)
+    this.starsEnabled = false;
+    this.restoreStarsEnabled();
 
     // 어댑터 초기화
     this.adapter = new ChatSiteAdapter();
@@ -801,10 +804,13 @@ class AicusNavigator {
 
     const conv = this.getConversationId();
     const questionsHTML = this.questions.map(question => {
-      const starred = this.stars.has(conv, this.getStarKey(question));
+      const starred = this.starsEnabled && this.stars.has(conv, this.getStarKey(question));
+      const starBtn = this.starsEnabled
+        ? `<button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${STAR_ICON}</button>`
+        : '';
       return `
-      <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
-        <button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${STAR_ICON}</button>
+      <div class="question-item${this.starsEnabled ? ' with-star' : ''}" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
+        ${starBtn}
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
     `;
@@ -815,7 +821,7 @@ class AicusNavigator {
     // 이벤트 추가
     content.querySelectorAll('.question-item').forEach(item => {
       // 별: 켜고 끄기만 하고 질문으로 이동하지 않음. 목록 전체를 다시 그리지 않고 이 버튼만 바꿈
-      item.querySelector('.star-btn').addEventListener('click', (e) => {
+      item.querySelector('.star-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const question = this.questions.find(q => q.index === parseInt(item.dataset.index));
         if (!question) return;
@@ -1100,7 +1106,7 @@ class AicusNavigator {
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 12px 16px 12px 10px;
+        padding: 12px 16px;
         border-bottom: 1px solid var(--border-color);
         cursor: pointer;
         transition: all 0.2s ease;
@@ -1118,6 +1124,31 @@ class AicusNavigator {
 
       .dark .question-item:hover {
         background: var(--hover-bg-dark);
+      }
+
+      .question-item.with-star {
+        padding-left: 10px;
+      }
+
+      /* 헤더 즐겨찾기 버튼: 회색 테두리 = 꺼짐, 파스텔 노랑 = 켜짐 */
+      .star-toggle-btn svg {
+        fill: transparent;
+        stroke: #b4b4bc;
+        transition: fill 0.15s ease, stroke 0.15s ease;
+      }
+
+      .dark .star-toggle-btn svg {
+        stroke: #8b93a1;
+      }
+
+      .star-toggle-btn.on svg {
+        fill: #ffdf8a;
+        stroke: #ffdf8a;
+      }
+
+      .dark .star-toggle-btn.on svg {
+        fill: #f3d98b;
+        stroke: #f3d98b;
       }
 
       /* 별: 꺼짐 = 아주 연한 회색 테두리만, 켜짐 = 파스텔 노랑 한 가지 색(채움과 테두리 같음) */
@@ -1410,6 +1441,7 @@ class AicusNavigator {
         </svg>
         <span class="title">Aicus</span>
         <div class="controls">
+          <button class="control-btn star-toggle-btn" title="즐겨찾기 기능을 활성화합니다">${STAR_ICON}</button>
           <button class="control-btn load-all-btn" title="전체 질문 불러오기 (대화를 한 번 훑은 뒤 원래 위치로 돌아옵니다)" hidden>⇅</button>
           <button class="control-btn settings-btn" title="설정">
             <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
@@ -1595,6 +1627,17 @@ class AicusNavigator {
       e.stopPropagation();
       this.toggleSettings();
     });
+
+    // 즐겨찾기(별표) 기능 켜기/끄기: 끄면 목록에서 별만 숨기고 저장된 별표는 지우지 않음
+    const starToggleBtn = this.shadowRoot.querySelector('.star-toggle-btn');
+    starToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.starsEnabled = !this.starsEnabled;
+      this.saveStarsEnabled();
+      this.updateStarToggle();
+      this.updateQuestionsList();
+    });
+    this.updateStarToggle();
     
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
 
@@ -2148,6 +2191,34 @@ class AicusNavigator {
     } catch (e) {
       // 저장 실패(용량 초과 등): 이번 화면에서만 적용
     }
+  }
+
+  restoreStarsEnabled() {
+    try {
+      this.starsEnabled = localStorage.getItem('aicusStarsEnabled') === '1';
+    } catch (e) {
+      // 기본값(꺼짐) 유지
+    }
+  }
+
+  saveStarsEnabled() {
+    try {
+      if (this.starsEnabled) localStorage.setItem('aicusStarsEnabled', '1');
+      else localStorage.removeItem('aicusStarsEnabled');
+    } catch (e) {
+      // 저장 실패: 이번 화면에서만 적용
+    }
+  }
+
+  // 헤더의 별 버튼: 노랑 = 즐겨찾기 켜짐, 회색 = 꺼짐
+  updateStarToggle() {
+    const btn = this.shadowRoot.querySelector('.star-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('on', this.starsEnabled);
+    btn.setAttribute('aria-pressed', String(this.starsEnabled));
+    btn.title = this.starsEnabled
+      ? '즐겨찾기 기능을 끕니다 (표시한 별표는 지워지지 않아요)'
+      : '즐겨찾기 기능을 활성화합니다';
   }
 
   updateColorPalette() {
