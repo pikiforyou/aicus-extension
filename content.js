@@ -1476,6 +1476,34 @@ class AicusNavigator {
     scroller.scrollTo({ top, behavior: 'instant' });
   }
 
+  // 스크롤 영역의 화면상 맨 위 좌표
+  getScrollerViewTop(scroller) {
+    return scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+  }
+
+  // 지금 보고 있는 위치: 화면에 걸쳐 보이는 첫 턴의 키와 화면 안 위치, 그리고 아래에서부터의 거리
+  captureScrollOrigin(scroller) {
+    const viewTop = this.getScrollerViewTop(scroller);
+    const turn = this.getRenderedTurns().find(t => t.getBoundingClientRect().bottom > viewTop);
+    return {
+      fromBottom: scroller.scrollHeight - scroller.scrollTop,
+      key: turn ? turn.getAttribute(TURN_KEY_ATTR) : null,
+      offset: turn ? turn.getBoundingClientRect().top - viewTop : 0
+    };
+  }
+
+  // 아래에서부터의 거리로 먼저 이동한 뒤, 기억한 턴이 그려져 있으면 그 턴 기준으로 정확히 맞춤
+  async restoreScrollOrigin(scroller, origin) {
+    this.jumpScroll(scroller, scroller.scrollHeight - origin.fromBottom);
+    if (!origin.key) return;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const turn = [...document.querySelectorAll(`[${TURN_KEY_ATTR}]`)]
+      .find(t => t.getAttribute(TURN_KEY_ATTR) === origin.key && this.adapter.isElementVisible(t));
+    if (!turn) return;
+    const delta = turn.getBoundingClientRect().top - this.getScrollerViewTop(scroller) - origin.offset;
+    if (Math.abs(delta) > 1) this.jumpScroll(scroller, scroller.scrollTop + delta);
+  }
+
   // 위쪽 턴이 화면 밖으로 빠졌는지: 대화 영역 맨 위 ~ 첫 번째로 그려진 턴 사이 빈 공간으로 판정
   // 실측(Claude): 전부 그려진 대화 81px, 가상화된 대화 7433~13172px
   // 아래쪽 빈 공간은 쓰지 않음 (ChatGPT는 대화 끝에 큰 여백을 둬 오판하는 것으로 추정)
@@ -1557,7 +1585,9 @@ class AicusNavigator {
     this.updateLoadStatus();
 
     const startUrl = window.location.href;
-    const originalTop = scroller.scrollTop;
+    // 원래 위치 기억: 불러오는 동안 위쪽에 이전 메시지가 붙으면 "위에서 몇 px"는 어긋나므로
+    // 화면 맨 위에 보이던 턴(키 + 화면 안 위치)과 "아래에서 몇 px"로 기억
+    const origin = this.captureScrollOrigin(scroller);
     let cancelled = false;
     let cancelReason = null;
     const cancel = (e) => {
@@ -1742,7 +1772,7 @@ class AicusNavigator {
         this.loadEndState = { url: startUrl, kind: 'incomplete' };
       }
       if (stillValid()) {
-        this.jumpScroll(scroller, originalTop);
+        await this.restoreScrollOrigin(scroller, origin);
       }
       btn.disabled = false;
       this.isLoadingAll = false;
