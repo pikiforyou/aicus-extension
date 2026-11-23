@@ -23,6 +23,8 @@ const debugLog = (label, data) => {
 //   findRenamedKey: (선택) 처음 보는 턴 키가 기존 질문의 키가 바뀐 것인지 판정 → 기존 키 또는 null
 //   topLoad:        (선택) 전체 불러오기 때 맨 위에서 이전 메시지를 받아오는 방식
 //                   { wheel: 위로 휠 신호 보낼지, waitMs: 변화 기다리는 시간, maxMs: 맨 위 단계 최대 시간 }
+//   moreAbove:      (선택) "전체 질문을 보려면 ⇅" 안내를 띄울 조건
+//                   'gap'(기본): 위쪽에 빈 공간(가상화로 빠진 턴)이 보이면 / 'untilLoaded': 전체 불러오기 전까지 항상
 
 // 대화 턴 키 (Claude, ChatGPT 실측 공통): 질문/답변 턴마다 붙는 고유 UUID
 const TURN_KEY_ATTR = 'data-turn-key';
@@ -47,7 +49,9 @@ const SITES = {
       return sameText.length ? sameText[sameText.length - 1].key : null;
     },
     // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
-    topLoad: { wheel: true, waitMs: 3000, maxMs: 40000 }
+    topLoad: { wheel: true, waitMs: 3000, maxMs: 40000 },
+    // 이전 메시지를 아예 안 받아온 상태라 위쪽 빈 공간으로 판정할 수 없음 (실측: 11개 중 5개만, 빈 공간 없음)
+    moreAbove: 'untilLoaded'
   },
   claude: {
     match: h => h.includes('claude.ai'),
@@ -1556,6 +1560,8 @@ class AicusNavigator {
   // (스크롤 위치마다 판정이 바뀌어 안내가 떴다 사라졌다 하지 않도록)
   isMissingTurnsSeen(url) {
     if (this.missingTurnsUrls.has(url)) return true;
+    // 위쪽이 남았는지 알 수 없는 사이트(ChatGPT): 질문이 있으면 전체 불러오기 전까지 항상 안내
+    if (this.adapter.site?.moreAbove === 'untilLoaded') return this.questions.length > 0;
     if (this.hasMissingTurnsAbove()) {
       this.missingTurnsUrls.add(url);
       return true;
