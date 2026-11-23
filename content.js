@@ -31,6 +31,8 @@ const SITES = {
     // 다른 대화로 이동해도 이전 대화의 질문을 숨긴 채 DOM에 남겨두므로 보이는 것만 사용
     visibleOnly: true,
     turns: true,
+    // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
+    wheelAtTop: true,
     relevantWithin: '[data-testid*="conversation"]',
     extract: el => el.textContent?.trim()
   },
@@ -1550,6 +1552,8 @@ class AicusNavigator {
     let cancelled = false;
     let cancelReason = null;
     const cancel = (e) => {
+      // ChatGPT용으로 직접 보내는 휠 신호(isTrusted=false)는 사용자 입력이 아니므로 무시
+      if (!e.isTrusted) return;
       if (!cancelled) cancelReason = e.type;
       cancelled = true;
     };
@@ -1632,16 +1636,27 @@ class AicusNavigator {
     // 1) 맨 위로: Claude는 맨 위에 닿으면 이전 메시지를 서버에서 더 받아와 위에 붙임
     //    (실측: 높이 14565→30432, 같은 만큼 위치도 밀림 = 위쪽에 내용 추가 + 스크롤 위치 유지)
     //    → 맨 위에서 1초 동안 높이·위치 변화가 없을 때까지 다시 올라가며 기다림 (최대 20초)
+    //    ChatGPT는 맨 위에서 위로 휠 입력이 있어야 이전 메시지를 몇 개씩 불러옴(실측 약 1.4초 후)
+    //    → 휠 신호를 보내고 3초까지 기다림 (최대 40초)
+    const wheelAtTop = !!this.adapter.site?.wheelAtTop;
+    const topWaitSteps = wheelAtTop ? 30 : 10;
     const goTop = async (pass) => {
       covered.clear();
       const started = Date.now();
-      while (stillValid() && Date.now() - started < 20000) {
+      while (stillValid() && Date.now() - started < (wheelAtTop ? 40000 : 20000)) {
         const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
         const settleMs = await settle(far);
+        if (wheelAtTop) {
+          // 측정 때와 같게 150ms 간격으로 여러 번 보냄
+          for (let i = 0; i < 5 && stillValid(); i++) {
+            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+            await wait(150);
+          }
+        }
         const h0 = scroller.scrollHeight;
         let grew = false;
-        for (let i = 0; i < 10 && stillValid(); i++) {
+        for (let i = 0; i < topWaitSteps && stillValid(); i++) {
           await wait(100);
           if (scroller.scrollHeight !== h0 || scroller.scrollTop > 2) { grew = true; break; }
         }
