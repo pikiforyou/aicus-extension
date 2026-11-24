@@ -5,10 +5,10 @@
       <stop offset="1" stop-color="#7b52b4"/>
     </linearGradient>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="26.88" fill="url(#bg)"/>
-  <g transform="translate(64 64) scale(1.365) translate(-32 -32)">
-    <circle cx="32" cy="32" r="28" fill="none" stroke="#ffffff" stroke-width="6"/>
-    <path fill="#ffe08a" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
+  <rect x="9" y="9" width="110" height="110" rx="26.88" fill="#ffffff" stroke="#e4defa" stroke-width="2"/>
+  <g transform="translate(64 64) scale(1.4000000000000001) translate(-32 -32)">
+    <circle cx="32" cy="32" r="28" fill="none" stroke="#6c5ce0" stroke-width="6"/>
+    <path fill="#b9b0f2" d="M32 10l5.5 12.8L50 28.5 37.2 34 32 50 26.8 34 14 28.5l12.5-5.7L32 10z"/>
     <path fill="#4b3d8f" d="M36 20 44 34 28 44z"/>
     <circle cx="32" cy="32" r="3" fill="#4b3d8f"/>
   </g>
