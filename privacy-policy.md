@@ -8,17 +8,27 @@
 - 웹페이지의 DOM 요소만 읽어서 질문 목록을 생성합니다.
 - 사용자가 입력한 내용은 외부로 전송되지 않습니다.
 
+## 브라우저에 저장하는 정보
+지원 사이트의 브라우저 저장소(localStorage)에 아래 설정만 저장합니다. 외부로 전송하지 않습니다.
+- 고른 테마 색상
+- 즐겨찾기 기능 켜짐/꺼짐
+- 별표한 질문: 대화 주소 경로와 질문 식별자(사이트의 질문 ID 또는 짧은 해시)만 저장하며, 질문 내용은 저장하지 않습니다.
+
+저장된 값은 해당 사이트의 브라우저 데이터를 삭제하면 함께 삭제됩니다.
+
 ## 권한 사용
 - activeTab: 현재 탭에서만 동작하기 위한 최소 권한
 
 연락처: pikiforyou@gmail.com
+
+최종 수정: 2026.11.24
 
 ---
 
 # Aicus Privacy Policy
 
 ## Overview
-Aicus is committed to protecting user privacy. This extension operates entirely within your browser and does not collect, store, or transmit any personal data.
+Aicus is committed to protecting user privacy. This extension operates entirely within your browser and does not collect or transmit any personal data.
 
 ## Data Collection
 - **NO data collection**: Aicus does not collect any personal information
@@ -32,10 +42,17 @@ Aicus is committed to protecting user privacy. This extension operates entirely 
 ## Data Processing
 - Reads DOM elements to identify user questions
 - Creates local navigation lists
-- Stores theme preferences locally in browser
 - No data leaves your device
+
+## Data Stored in Your Browser
+Only these settings are saved in the supported site's browser storage (localStorage). They are never sent anywhere.
+- Your chosen theme color
+- Whether the favorites (star) feature is on
+- Starred questions: the conversation path and a question identifier (the site's question ID or a short hash) only — question text is never stored
+
+These values are deleted when you clear that site's browsing data.
 
 ## Contact
 For questions about this privacy policy: pikiforyou@gmail.com
 
-Last updated: 2025.09.01
+Last updated: 2026.11.24
