@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aicus",
-  "version": "1.2.0",
-  "description": "채팅 기록에서 질문/답변으로 쉽게 이동할 수 있는 플로팅 리스트. GPT, Claude, Gemini 지원. Created by @pikiforyou",
+  "version": "1.3.0",
+  "description": "ChatGPT·Claude·Gemini 긴 대화에서 내 질문만 모아 보여주고 클릭 한 번으로 이동. 전체 질문 불러오기, 즐겨찾기 지원.",
   "permissions": [
     "activeTab"
   ],

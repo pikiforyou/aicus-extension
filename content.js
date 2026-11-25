@@ -19,6 +19,12 @@ const debugLog = (label, data) => {
 //   relevantWithin: 이 영역 안의 변화도 다시 스캔할 변화로 봄
 //   findUserMessages: (선택) 질문 요소를 찾는 방식이 다를 때만
 //   extract:        질문 요소 → 질문 텍스트
+// 사이트마다 다른 동작은 아래 항목으로만 둔다 (없으면 공통 기본 동작, 다른 사이트에 영향 없음)
+//   findRenamedKey: (선택) 처음 보는 턴 키가 기존 질문의 키가 바뀐 것인지 판정 → 기존 키 또는 null
+//   topLoad:        (선택) 전체 불러오기 때 맨 위에서 이전 메시지를 받아오는 방식
+//                   { wheel: 위로 휠 신호 보낼지, waitMs: 변화 기다리는 시간, maxMs: 맨 위 단계 최대 시간 }
+//   moreAbove:      (선택) "전체 질문을 보려면 ⇅" 안내를 띄울 조건
+//                   'gap'(기본): 위쪽에 빈 공간(가상화로 빠진 턴)이 보이면 / 'untilLoaded': 전체 불러오기 전까지 항상
 
 // 대화 턴 키 (Claude, ChatGPT 실측 공통): 질문/답변 턴마다 붙는 고유 UUID
 const TURN_KEY_ATTR = 'data-turn-key';
@@ -32,7 +38,21 @@ const SITES = {
     visibleOnly: true,
     turns: true,
     relevantWithin: '[data-testid*="conversation"]',
-    extract: el => el.textContent?.trim()
+    extract: el => el.textContent?.trim(),
+    // 답변 생성 중 같은 질문의 턴 키가 1~2번 바뀌고 질문 요소도 새로 만들어짐 (실측)
+    // candidates: 지금 화면에 없는 기존 항목들 [{ key, text, element }]
+    // 같은 요소를 우선, 없으면 같은 텍스트이면서 요소가 DOM에서 빠진 항목
+    findRenamedKey(el, text, candidates) {
+      const sameEl = candidates.find(q => q.element === el);
+      if (sameEl) return sameEl.key;
+      const sameText = candidates.filter(q => q.text === text && (!q.element || !q.element.isConnected));
+      return sameText.length ? sameText[sameText.length - 1].key : null;
+    },
+    // 맨 위로 이동만 해서는 이전 메시지를 안 불러오고, 위로 휠 입력이 있어야 몇 개씩 불러옴 (실측 약 1.4초 후)
+    // waitMs는 첫 휠 신호부터 잼 (실측 1.4초의 약 1.8배)
+    topLoad: { wheel: true, waitMs: 2500, maxMs: 40000 },
+    // 이전 메시지를 아예 안 받아온 상태라 위쪽 빈 공간으로 판정할 수 없음 (실측: 11개 중 5개만, 빈 공간 없음)
+    moreAbove: 'untilLoaded'
   },
   claude: {
     match: h => h.includes('claude.ai'),
@@ -44,7 +64,9 @@ const SITES = {
     extract: el => {
       const p = el.querySelector('p.whitespace-pre-wrap');
       return p ? p.textContent?.trim() : el.textContent?.trim();
-    }
+    },
+    // 맨 위에 닿으면 스스로 이전 메시지를 받아와 위에 붙임 → 1초 변화 없을 때까지 대기 (실측)
+    topLoad: { wheel: false, waitMs: 1000, maxMs: 20000 }
   },
   gemini: {
     match: h => h.includes('gemini.google.com') || h.includes('bard.google.com'),
@@ -136,6 +158,83 @@ class ChatSiteAdapter {
       : elements.length > 0;
   }
 }
+
+// ===== 1-2. 별표 저장소 =====
+// 사이트 localStorage 'aicusStars' = { 대화 경로: [질문 키, ...] } — 질문 텍스트는 저장하지 않음
+// 저장소를 쓸 수 없으면(차단 등) 이번 화면에서만 기억
+const STAR_STORAGE_KEY = 'aicusStars';
+const STAR_MAX_CONVERSATIONS = 300; // 오래된 대화부터 정리
+
+const createStarStore = () => {
+  let data = {};
+  let storageOk = false;
+
+  // 다른 탭에서 바꾼 내용을 덮어쓰지 않도록 바꾸기 직전마다 다시 읽음
+  const load = () => {
+    let raw;
+    try {
+      raw = localStorage.getItem(STAR_STORAGE_KEY);
+      storageOk = true;
+    } catch (e) {
+      return; // 저장소 차단: 메모리 값 유지
+    }
+    try {
+      const parsed = JSON.parse(raw || '{}');
+      data = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+      data = {}; // 깨진 값은 버리고 새로 시작
+    }
+  };
+  const save = () => {
+    if (!storageOk) return;
+    try {
+      localStorage.setItem(STAR_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      // 저장 실패(용량 초과 등): 이번 화면에서만 유지
+    }
+  };
+
+  load();
+  return {
+    has(conv, key) {
+      return Array.isArray(data[conv]) && data[conv].includes(key);
+    },
+    // 켜고 끄기 → 바뀐 상태(true = 켜짐)
+    toggle(conv, key) {
+      load();
+      const list = Array.isArray(data[conv]) ? data[conv] : [];
+      const on = !list.includes(key);
+      const next = on ? [...list, key] : list.filter(k => k !== key);
+      delete data[conv]; // 최근에 쓴 대화를 뒤로 보내 오래된 것부터 정리
+      if (next.length) data[conv] = next;
+      const convs = Object.keys(data);
+      while (convs.length > STAR_MAX_CONVERSATIONS) delete data[convs.shift()];
+      save();
+      return on;
+    },
+    // 질문 키가 바뀐 경우(ChatGPT) 별표도 따라감
+    rename(conv, oldKey, newKey) {
+      if (!this.has(conv, oldKey)) return;
+      load();
+      const list = Array.isArray(data[conv]) ? data[conv] : [];
+      data[conv] = list.map(k => (k === oldKey ? newKey : k));
+      save();
+    }
+  };
+};
+
+// 꼭짓점이 둥근 별 아이콘 (Lucide "star", ISC 라이선스). 켜짐/꺼짐은 CSS의 채우기 색으로만 구분
+const STAR_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>';
+
+// 키가 없는 사이트(Gemini)용: 질문 텍스트 → 짧은 해시 (FNV-1a 32bit, 텍스트 복원 불가)
+const hashText = (text) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return 'h' + (h >>> 0).toString(36);
+};
 
 // ===== 2. 최적화된 MutationObserver =====
 class OptimizedObserver {
@@ -366,6 +465,12 @@ class AicusNavigator {
     // 고른 색 기억 (사이트 localStorage, 사이트별로 따로 저장됨)
     this.restoreAccentColor();
 
+    // 별표 (사이트 localStorage, 대화 경로 + 질문 키만 저장)
+    this.stars = createStarStore();
+    // 즐겨찾기 기능 사용 여부 (기본 꺼짐: 원래 쓰던 목록 그대로)
+    this.starsEnabled = false;
+    this.restoreStarsEnabled();
+
     // 어댑터 초기화
     this.adapter = new ChatSiteAdapter();
     
@@ -550,12 +655,27 @@ class AicusNavigator {
     let changed = false;
     let lastIdx = -1;
     let scroller = null;
+    let renderedKeys = null;
+    const findRenamedKey = this.adapter.site?.findRenamedKey;
 
     userMessages.forEach(el => {
       const key = this.getTurnKey(el);
       if (!key) return;
       const text = this.adapter.extractText(el);
       if (!text || !this.isValidQuestion(text)) return;
+
+      // 키가 바뀌는 사이트(ChatGPT)만: 새 질문으로 추가하지 않고 기존 항목의 키만 교체
+      // 처음 보는 키일 때만 실행되므로 평소 스캔 비용은 늘지 않음
+      if (findRenamedKey && this.questionMap.size > 0 && !this.questionMap.has(key)) {
+        if (!renderedKeys) renderedKeys = new Set(userMessages.map(m => this.getTurnKey(m)));
+        const candidates = this.questionOrder
+          .filter(k => !renderedKeys.has(k))
+          .map(k => this.questionMap.get(k))
+          .filter(Boolean);
+        const oldKey = findRenamedKey(el, text, candidates);
+        debugLog('new turn key', { renamed: !!oldKey, map: this.questionMap.size, rendered: userMessages.length });
+        if (oldKey) this.renameQuestionKey(oldKey, key);
+      }
 
       const prev = this.questionMap.get(key);
       if (!prev || prev.text !== text) changed = true;
@@ -582,6 +702,26 @@ class AicusNavigator {
     });
 
     return changed;
+  }
+
+  // 같은 질문의 키가 바뀐 경우: 목록 위치와 저장 상태를 그대로 두고 키만 교체
+  renameQuestionKey(oldKey, newKey) {
+    const entry = this.questionMap.get(oldKey);
+    this.questionMap.delete(oldKey);
+    this.questionMap.set(newKey, { ...entry, key: newKey });
+    const idx = this.questionOrder.indexOf(oldKey);
+    if (idx !== -1) this.questionOrder[idx] = newKey;
+    this.stars.rename(this.getConversationId(), oldKey, newKey);
+  }
+
+  // 별표를 대화별로 나누는 기준: 주소의 경로 (예: /c/<id>, /chat/<id>, /app/<id>)
+  getConversationId() {
+    return window.location.pathname;
+  }
+
+  // 별표용 질문 키: 턴 키가 있으면 그대로(Claude, ChatGPT), 없으면 텍스트 해시(Gemini)
+  getStarKey(question) {
+    return question.key || hashText(question.fullText || question.text || '');
   }
 
   buildKeyedQuestions() {
@@ -662,16 +802,36 @@ class AicusNavigator {
       return;
     }
 
-    const questionsHTML = this.questions.map(question => `
-      <div class="question-item" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
+    const conv = this.getConversationId();
+    const questionsHTML = this.questions.map(question => {
+      const starred = this.starsEnabled && this.stars.has(conv, this.getStarKey(question));
+      const starBtn = this.starsEnabled
+        ? `<button type="button" class="star-btn${starred ? ' on' : ''}" aria-pressed="${starred}" title="${starred ? '별표 해제' : '별표'}">${STAR_ICON}</button>`
+        : '';
+      return `
+      <div class="question-item${this.starsEnabled ? ' with-star' : ''}" data-index="${question.index}" data-full-text="${this.escapeHtml(question.fullText)}">
+        ${starBtn}
         <div class="question-text">${this.escapeHtml(question.text.substring(0, 100))}${question.text.length > 100 ? '...' : ''}</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     content.innerHTML = questionsHTML;
 
     // 이벤트 추가
     content.querySelectorAll('.question-item').forEach(item => {
+      // 별: 켜고 끄기만 하고 질문으로 이동하지 않음. 목록 전체를 다시 그리지 않고 이 버튼만 바꿈
+      item.querySelector('.star-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const question = this.questions.find(q => q.index === parseInt(item.dataset.index));
+        if (!question) return;
+        const on = this.stars.toggle(this.getConversationId(), this.getStarKey(question));
+        const btn = e.currentTarget;
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-pressed', String(on));
+        btn.title = on ? '별표 해제' : '별표';
+      });
+
       item.addEventListener('click', () => {
         const index = parseInt(item.dataset.index);
         const question = this.questions.find(q => q.index === index);
@@ -943,6 +1103,9 @@ class AicusNavigator {
       }
 
       .question-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         padding: 12px 16px;
         border-bottom: 1px solid var(--border-color);
         cursor: pointer;
@@ -963,7 +1126,83 @@ class AicusNavigator {
         background: var(--hover-bg-dark);
       }
 
+      .question-item.with-star {
+        padding-left: 10px;
+      }
+
+      /* 헤더 즐겨찾기 버튼: 회색 테두리 = 꺼짐, 파스텔 노랑 = 켜짐 */
+      .star-toggle-btn svg {
+        fill: transparent;
+        stroke: #b4b4bc;
+        transition: fill 0.15s ease, stroke 0.15s ease;
+      }
+
+      .dark .star-toggle-btn svg {
+        stroke: #8b93a1;
+      }
+
+      .star-toggle-btn.on svg {
+        fill: #ffdf8a;
+        stroke: #ffdf8a;
+      }
+
+      .dark .star-toggle-btn.on svg {
+        fill: #f3d98b;
+        stroke: #f3d98b;
+      }
+
+      /* 별: 꺼짐 = 아주 연한 회색 테두리만, 켜짐 = 파스텔 노랑 한 가지 색(채움과 테두리 같음) */
+      .star-btn {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        background: none;
+        cursor: pointer;
+        transition: transform 0.15s ease;
+      }
+
+      .star-btn svg {
+        fill: transparent;
+        stroke: #e4e4e7;
+        transition: fill 0.15s ease, stroke 0.15s ease;
+      }
+
+      .star-btn:hover {
+        transform: scale(1.12);
+      }
+
+      .star-btn:hover svg {
+        stroke: #cfcfd4;
+      }
+
+      .star-btn.on svg,
+      .star-btn.on:hover svg {
+        fill: #ffdf8a;
+        stroke: #ffdf8a;
+      }
+
+      .dark .star-btn svg {
+        stroke: #474d58;
+      }
+
+      .dark .star-btn:hover svg {
+        stroke: #6b7280;
+      }
+
+      .dark .star-btn.on svg,
+      .dark .star-btn.on:hover svg {
+        fill: #f3d98b;
+        stroke: #f3d98b;
+      }
+
       .question-text {
+        flex: 1;
+        min-width: 0;
         font-size: 13px;
         line-height: 1.4;
         color: #333;
@@ -1202,6 +1441,7 @@ class AicusNavigator {
         </svg>
         <span class="title">Aicus</span>
         <div class="controls">
+          <button class="control-btn star-toggle-btn" title="즐겨찾기 기능을 활성화합니다">${STAR_ICON}</button>
           <button class="control-btn load-all-btn" title="전체 질문 불러오기 (대화를 한 번 훑은 뒤 원래 위치로 돌아옵니다)" hidden>⇅</button>
           <button class="control-btn settings-btn" title="설정">
             <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
@@ -1387,6 +1627,17 @@ class AicusNavigator {
       e.stopPropagation();
       this.toggleSettings();
     });
+
+    // 즐겨찾기(별표) 기능 켜기/끄기: 끄면 목록에서 별만 숨기고 저장된 별표는 지우지 않음
+    const starToggleBtn = this.shadowRoot.querySelector('.star-toggle-btn');
+    starToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.starsEnabled = !this.starsEnabled;
+      this.saveStarsEnabled();
+      this.updateStarToggle();
+      this.updateQuestionsList();
+    });
+    this.updateStarToggle();
     
     collapseBtn.addEventListener('click', () => this.toggleCollapse());
 
@@ -1433,6 +1684,34 @@ class AicusNavigator {
   // 페이지 CSS에 scroll-behavior: smooth가 있어도 애니메이션 없이 즉시 이동
   jumpScroll(scroller, top) {
     scroller.scrollTo({ top, behavior: 'instant' });
+  }
+
+  // 스크롤 영역의 화면상 맨 위 좌표
+  getScrollerViewTop(scroller) {
+    return scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+  }
+
+  // 지금 보고 있는 위치: 화면에 걸쳐 보이는 첫 턴의 키와 화면 안 위치, 그리고 아래에서부터의 거리
+  captureScrollOrigin(scroller) {
+    const viewTop = this.getScrollerViewTop(scroller);
+    const turn = this.getRenderedTurns().find(t => t.getBoundingClientRect().bottom > viewTop);
+    return {
+      fromBottom: scroller.scrollHeight - scroller.scrollTop,
+      key: turn ? turn.getAttribute(TURN_KEY_ATTR) : null,
+      offset: turn ? turn.getBoundingClientRect().top - viewTop : 0
+    };
+  }
+
+  // 아래에서부터의 거리로 먼저 이동한 뒤, 기억한 턴이 그려져 있으면 그 턴 기준으로 정확히 맞춤
+  async restoreScrollOrigin(scroller, origin) {
+    this.jumpScroll(scroller, scroller.scrollHeight - origin.fromBottom);
+    if (!origin.key) return;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const turn = [...document.querySelectorAll(`[${TURN_KEY_ATTR}]`)]
+      .find(t => t.getAttribute(TURN_KEY_ATTR) === origin.key && this.adapter.isElementVisible(t));
+    if (!turn) return;
+    const delta = turn.getBoundingClientRect().top - this.getScrollerViewTop(scroller) - origin.offset;
+    if (Math.abs(delta) > 1) this.jumpScroll(scroller, scroller.scrollTop + delta);
   }
 
   // 위쪽 턴이 화면 밖으로 빠졌는지: 대화 영역 맨 위 ~ 첫 번째로 그려진 턴 사이 빈 공간으로 판정
@@ -1487,6 +1766,8 @@ class AicusNavigator {
   // (스크롤 위치마다 판정이 바뀌어 안내가 떴다 사라졌다 하지 않도록)
   isMissingTurnsSeen(url) {
     if (this.missingTurnsUrls.has(url)) return true;
+    // 위쪽이 남았는지 알 수 없는 사이트(ChatGPT): 질문이 있으면 전체 불러오기 전까지 항상 안내
+    if (this.adapter.site?.moreAbove === 'untilLoaded') return this.questions.length > 0;
     if (this.hasMissingTurnsAbove()) {
       this.missingTurnsUrls.add(url);
       return true;
@@ -1516,10 +1797,14 @@ class AicusNavigator {
     this.updateLoadStatus();
 
     const startUrl = window.location.href;
-    const originalTop = scroller.scrollTop;
+    // 원래 위치 기억: 불러오는 동안 위쪽에 이전 메시지가 붙으면 "위에서 몇 px"는 어긋나므로
+    // 화면 맨 위에 보이던 턴(키 + 화면 안 위치)과 "아래에서 몇 px"로 기억
+    const origin = this.captureScrollOrigin(scroller);
     let cancelled = false;
     let cancelReason = null;
     const cancel = (e) => {
+      // ChatGPT용으로 직접 보내는 휠 신호(isTrusted=false)는 사용자 입력이 아니므로 무시
+      if (!e.isTrusted) return;
       if (!cancelled) cancelReason = e.type;
       cancelled = true;
     };
@@ -1599,20 +1884,30 @@ class AicusNavigator {
 
     const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
 
-    // 1) 맨 위로: Claude는 맨 위에 닿으면 이전 메시지를 서버에서 더 받아와 위에 붙임
-    //    (실측: 높이 14565→30432, 같은 만큼 위치도 밀림 = 위쪽에 내용 추가 + 스크롤 위치 유지)
-    //    → 맨 위에서 1초 동안 높이·위치 변화가 없을 때까지 다시 올라가며 기다림 (최대 20초)
+    // 1) 맨 위로: 맨 위에서 이전 메시지가 위에 붙으면(높이 증가 또는 위치 밀림) 다시 올라가며
+    //    변화가 없을 때까지 반복. 받아오는 방식과 대기 시간은 사이트 설정(SITES.*.topLoad)
+    const topLoad = { wheel: false, waitMs: 1000, maxMs: 20000, ...this.adapter.site?.topLoad };
     const goTop = async (pass) => {
       covered.clear();
       const started = Date.now();
-      while (stillValid() && Date.now() - started < 20000) {
+      while (stillValid() && Date.now() - started < topLoad.maxMs) {
         const far = scroller.scrollTop > scroller.clientHeight;
         this.jumpScroll(scroller, 0);
         const settleMs = await settle(far);
+        // waitMs 동안 변화 감시. 휠 신호는 측정 때처럼 150ms 간격 최대 5번 보내되,
+        // 이전 메시지가 붙는 즉시 다음 단계로 넘어감 (휠을 다 보낼 때까지 기다리지 않음)
         const h0 = scroller.scrollHeight;
+        const waitStart = Date.now();
         let grew = false;
-        for (let i = 0; i < 10 && stillValid(); i++) {
-          await wait(100);
+        let wheels = 0;
+        let lastWheel = 0;
+        while (stillValid() && Date.now() - waitStart < topLoad.waitMs) {
+          if (topLoad.wheel && wheels < 5 && Date.now() - lastWheel >= 150) {
+            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+            wheels++;
+            lastWheel = Date.now();
+          }
+          await wait(50);
           if (scroller.scrollHeight !== h0 || scroller.scrollTop > 2) { grew = true; break; }
         }
         snapshot({ phase: 'top', pass, settleMs, grew });
@@ -1691,7 +1986,7 @@ class AicusNavigator {
         this.loadEndState = { url: startUrl, kind: 'incomplete' };
       }
       if (stillValid()) {
-        this.jumpScroll(scroller, originalTop);
+        await this.restoreScrollOrigin(scroller, origin);
       }
       btn.disabled = false;
       this.isLoadingAll = false;
@@ -1896,6 +2191,34 @@ class AicusNavigator {
     } catch (e) {
       // 저장 실패(용량 초과 등): 이번 화면에서만 적용
     }
+  }
+
+  restoreStarsEnabled() {
+    try {
+      this.starsEnabled = localStorage.getItem('aicusStarsEnabled') === '1';
+    } catch (e) {
+      // 기본값(꺼짐) 유지
+    }
+  }
+
+  saveStarsEnabled() {
+    try {
+      if (this.starsEnabled) localStorage.setItem('aicusStarsEnabled', '1');
+      else localStorage.removeItem('aicusStarsEnabled');
+    } catch (e) {
+      // 저장 실패: 이번 화면에서만 적용
+    }
+  }
+
+  // 헤더의 별 버튼: 노랑 = 즐겨찾기 켜짐, 회색 = 꺼짐
+  updateStarToggle() {
+    const btn = this.shadowRoot.querySelector('.star-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('on', this.starsEnabled);
+    btn.setAttribute('aria-pressed', String(this.starsEnabled));
+    btn.title = this.starsEnabled
+      ? '즐겨찾기 기능을 끕니다 (표시한 별표는 지워지지 않아요)'
+      : '즐겨찾기 기능을 활성화합니다';
   }
 
   updateColorPalette() {
