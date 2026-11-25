@@ -5,7 +5,7 @@
 ## 지원 버전
 | 버전 | 지원 |
 |---|---|
-| Chrome 웹스토어 최신 버전 (1.2.x) | ✅ |
+| Chrome 웹스토어 최신 버전 (1.3.x) | ✅ |
 | 이전 버전 | ❌ (최신 버전으로 업데이트해 주세요) |
 
 ## 취약점 신고
@@ -36,7 +36,7 @@
 ## Supported Versions
 | Version | Supported |
 |---|---|
-| Latest version on the Chrome Web Store (1.2.x) | ✅ |
+| Latest version on the Chrome Web Store (1.3.x) | ✅ |
 | Older versions | ❌ (please update) |
 
 ## Reporting a Vulnerability
